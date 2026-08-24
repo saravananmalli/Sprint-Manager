@@ -1,0 +1,194 @@
+{
+  "projects": [
+    {
+      "id": "checkout-revamp",
+      "name": "Checkout Revamp",
+      "teamSlug": "checkout-team",
+      "channel": "checkout-team",
+      "sprintName": "Sprint 14 - Checkout Revamp",
+      "startDate": "2026-07-28",
+      "endDate": "2026-08-08",
+      "totalCommitted": 24,
+      "pointsDone": 14,
+      "prefix": "CHK",
+      "tickets": [
+        {
+          "id": "CHK-101",
+          "summary": "Implement Stripe payment intent flow",
+          "status": "Done",
+          "assignee": { "name": "Alice Chen", "email": "alice.chen@example.com" },
+          "storyPoints": 5,
+          "priority": "P3",
+          "priorityLabel": "Low",
+          "lastUpdated": "2026-08-02T00:00:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "User can complete checkout using Stripe payment intents end to end."
+        },
+        {
+          "id": "CHK-102",
+          "summary": "Add tax calculation service integration",
+          "status": "Done",
+          "assignee": { "name": "Bob Martinez", "email": "bob.martinez@example.com" },
+          "storyPoints": 5,
+          "priority": "P3",
+          "priorityLabel": "Low",
+          "lastUpdated": "2026-08-01T00:00:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "Cart total reflects tax service response for supported regions."
+        },
+        {
+          "id": "CHK-103",
+          "summary": "Refactor cart state to Redux Toolkit",
+          "status": "Done",
+          "assignee": { "name": "Carol Singh", "email": "carol.singh@example.com" },
+          "storyPoints": 4,
+          "priority": "P3",
+          "priorityLabel": "Low",
+          "lastUpdated": "2026-08-01T12:00:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "Cart state fully migrated off legacy context provider to Redux Toolkit slices."
+        },
+        {
+          "id": "CHK-104",
+          "summary": "Build order confirmation email template",
+          "status": "Backlog",
+          "assignee": { "name": "Alice Chen", "email": "alice.chen@example.com" },
+          "storyPoints": 3,
+          "priority": "P2",
+          "priorityLabel": "Med",
+          "lastUpdated": "2026-08-02T00:00:00Z",
+          "createdAt": "2026-07-29T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "Order confirmation email renders correctly across Gmail, Outlook, Apple Mail."
+        },
+        {
+          "id": "CHK-105",
+          "summary": "Add Apple Pay button to checkout",
+          "status": "In Review",
+          "assignee": { "name": "Carol Singh", "email": "carol.singh@example.com" },
+          "storyPoints": 3,
+          "priority": "P2",
+          "priorityLabel": "Med",
+          "lastUpdated": "2026-08-01T00:00:00Z",
+          "createdAt": "2026-07-29T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "Apple Pay button visible on Safari and completes a sandbox transaction."
+        },
+        {
+          "id": "CHK-106",
+          "summary": "Migrate legacy checkout API to GraphQL",
+          "status": "Testing",
+          "assignee": { "name": "Bob Martinez", "email": "bob.martinez@example.com" },
+          "storyPoints": 5,
+          "priority": "P2",
+          "priorityLabel": "Med",
+          "lastUpdated": "2026-07-31T00:00:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": "All checkout REST calls replaced with equivalent GraphQL queries/mutations."
+        },
+        {
+          "id": "CHK-107",
+          "summary": "Investigate failed payment retry logic",
+          "status": "In Progress",
+          "assignee": { "name": "David Okonkwo", "email": "david.okonkwo@example.com" },
+          "storyPoints": 3,
+          "priority": "P2",
+          "priorityLabel": "Med",
+          "lastUpdated": "2026-07-31T09:15:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": [],
+          "acceptanceCriteria": ""
+        },
+        {
+          "id": "CHK-108",
+          "summary": "Wire fraud-detection service into checkout flow",
+          "status": "In Progress",
+          "assignee": { "name": "Priya Sharma", "email": "priya.sharma@example.com" },
+          "storyPoints": 3,
+          "priority": "P0",
+          "priorityLabel": "Urgent",
+          "lastUpdated": "2026-07-30T11:00:00Z",
+          "createdAt": "2026-07-28T09:00:00Z",
+          "blockers": ["PROJ-201 - Risk service API contract not finalized"],
+          "acceptanceCriteria": "Fraud score returned by risk service blocks checkout above threshold."
+        }
+      ]
+    },
+    {
+      "id": "payments-platform",
+      "name": "Payments Platform",
+      "teamSlug": "payments-team",
+      "channel": "payments-team",
+      "sprintName": "Sprint 22 - Payouts v2",
+      "startDate": "2026-07-20",
+      "endDate": "2026-08-10",
+      "totalCommitted": 32,
+      "pointsDone": 18,
+      "prefix": "PAY",
+      "tickets": [
+        { "id": "PAY-201", "summary": "Design payout batching schema", "status": "Done", "assignee": { "name": "Priya Sharma", "email": "priya.sharma@example.com" }, "storyPoints": 5, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-08-02T00:00:00Z", "createdAt": "2026-07-20T09:00:00Z", "blockers": [], "acceptanceCriteria": "Schema supports batched payouts with idempotency keys." },
+        { "id": "PAY-202", "summary": "Implement payout retry queue", "status": "Done", "assignee": { "name": "Tom Yang", "email": "tom.yang@example.com" }, "storyPoints": 5, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-08-01T00:00:00Z", "createdAt": "2026-07-20T09:00:00Z", "blockers": [], "acceptanceCriteria": "Failed payouts retried with exponential backoff up to 5 attempts." },
+        { "id": "PAY-203", "summary": "Add payout status webhook", "status": "In Progress", "assignee": { "name": "Sara Iqbal", "email": "sara.iqbal@example.com" }, "storyPoints": 3, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-08-01T10:00:00Z", "createdAt": "2026-07-21T09:00:00Z", "blockers": [], "acceptanceCriteria": "Partner webhook fires on payout state change with signed payload." },
+        { "id": "PAY-204", "summary": "Reconcile ledger drift job", "status": "In Progress", "assignee": { "name": "Maria Lopez", "email": "maria.lopez@example.com" }, "storyPoints": 5, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-07-30T09:00:00Z", "createdAt": "2026-07-21T09:00:00Z", "blockers": [], "acceptanceCriteria": "" },
+        { "id": "PAY-205", "summary": "Multi-currency payout support", "status": "Todo", "assignee": { "name": "Tom Yang", "email": "tom.yang@example.com" }, "storyPoints": 8, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-29T09:00:00Z", "createdAt": "2026-07-20T09:00:00Z", "blockers": ["PAY-201"], "acceptanceCriteria": "Payouts can settle in USD, EUR, GBP with correct FX conversion." },
+        { "id": "PAY-206", "summary": "Payout audit log export", "status": "Todo", "assignee": { "name": "Sara Iqbal", "email": "sara.iqbal@example.com" }, "storyPoints": 3, "priority": "P3", "priorityLabel": "Low", "lastUpdated": "2026-07-22T09:00:00Z", "createdAt": "2026-07-20T09:00:00Z", "blockers": [], "acceptanceCriteria": "Compliance can export a CSV of all payout events for a date range." },
+        { "id": "PAY-207", "summary": "Rate-limit payout API", "status": "In Progress", "assignee": { "name": "Priya Sharma", "email": "priya.sharma@example.com" }, "storyPoints": 3, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-31T09:00:00Z", "createdAt": "2026-07-22T09:00:00Z", "blockers": [], "acceptanceCriteria": "Payout endpoint limited to 20 req/min per merchant." }
+      ]
+    },
+    {
+      "id": "search-relevance",
+      "name": "Search Relevance",
+      "teamSlug": "search-team",
+      "channel": "search-team",
+      "sprintName": "Sprint 8 - Hybrid Retrieval",
+      "startDate": "2026-07-22",
+      "endDate": "2026-08-05",
+      "totalCommitted": 31,
+      "pointsDone": 8,
+      "prefix": "SRCH",
+      "tickets": [
+        { "id": "SRCH-301", "summary": "Stand up BM25 baseline index", "status": "Done", "assignee": { "name": "Maria Lopez", "email": "maria.lopez@example.com" }, "storyPoints": 5, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-30T00:00:00Z", "createdAt": "2026-07-22T09:00:00Z", "blockers": [], "acceptanceCriteria": "Baseline BM25 index queryable with sub-200ms p95 latency." },
+        { "id": "SRCH-302", "summary": "Integrate embedding model for dense retrieval", "status": "In Progress", "assignee": { "name": "Eve Kapoor", "email": "eve.kapoor@example.com" }, "storyPoints": 8, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-07-27T09:00:00Z", "createdAt": "2026-07-22T09:00:00Z", "blockers": [], "acceptanceCriteria": "" },
+        { "id": "SRCH-303", "summary": "Hybrid scoring: merge dense + sparse ranks", "status": "In Progress", "assignee": { "name": "Maria Lopez", "email": "maria.lopez@example.com" }, "storyPoints": 8, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-07-26T09:00:00Z", "createdAt": "2026-07-23T09:00:00Z", "blockers": ["SRCH-302"], "acceptanceCriteria": "Reciprocal rank fusion combines dense and sparse result sets." },
+        { "id": "SRCH-304", "summary": "Query rewriting for typo tolerance", "status": "Todo", "assignee": { "name": "Eve Kapoor", "email": "eve.kapoor@example.com" }, "storyPoints": 5, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-24T09:00:00Z", "createdAt": "2026-07-22T09:00:00Z", "blockers": [], "acceptanceCriteria": "Common typos in top 100 queries resolve to intended results." },
+        { "id": "SRCH-305", "summary": "Offline relevance eval harness", "status": "In Progress", "assignee": { "name": "Maria Lopez", "email": "maria.lopez@example.com" }, "storyPoints": 5, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-25T09:00:00Z", "createdAt": "2026-07-22T09:00:00Z", "blockers": [], "acceptanceCriteria": "NDCG@10 computed nightly against golden query set." }
+      ]
+    },
+    {
+      "id": "auth-hardening",
+      "name": "Sprint 14 — Payments & Auth Hardening",
+      "teamSlug": "sprint-14-payments-auth",
+      "channel": "sprint-14-payments-auth",
+      "sprintName": "Sprint 14 — Payments & Auth Hardening",
+      "startDate": "2026-07-25",
+      "endDate": "2026-08-07",
+      "totalCommitted": 37,
+      "pointsDone": 16,
+      "prefix": "AUTH",
+      "tickets": [
+        { "id": "AUTH-401", "summary": "Two-factor authentication rollout", "status": "Done", "assignee": { "name": "David Okonkwo", "email": "david.okonkwo@example.com" }, "storyPoints": 8, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-08-01T00:00:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": [], "acceptanceCriteria": "TOTP enrollment and challenge flow shipped behind feature flag." },
+        { "id": "AUTH-402", "summary": "Session invalidation on password change", "status": "Done", "assignee": { "name": "Nina Patel", "email": "nina.patel@example.com" }, "storyPoints": 5, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-07-31T00:00:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": [], "acceptanceCriteria": "Changing password revokes all other active sessions immediately." },
+        { "id": "AUTH-403", "summary": "Rate limiting on auth endpoints", "status": "In Progress", "assignee": { "name": "David Okonkwo", "email": "david.okonkwo@example.com" }, "storyPoints": 3, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-26T09:00:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": [], "acceptanceCriteria": "Login rate-limited to 5 attempts/min per IP." },
+        { "id": "AUTH-404", "summary": "Audit log for auth events", "status": "In Progress", "assignee": { "name": "Nina Patel", "email": "nina.patel@example.com" }, "storyPoints": 3, "priority": "P2", "priorityLabel": "Med", "lastUpdated": "2026-07-25T09:15:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": [], "acceptanceCriteria": "" },
+        { "id": "AUTH-405", "summary": "SSO integration with Okta", "status": "Todo", "assignee": { "name": "David Okonkwo", "email": "david.okonkwo@example.com" }, "storyPoints": 8, "priority": "P1", "priorityLabel": "High", "lastUpdated": "2026-07-27T11:00:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": ["AUTH-401"], "acceptanceCriteria": "Users authenticate via Okta SAML; role mapping preserved." },
+        { "id": "AUTH-406", "summary": "Rotate signing keys for JWT", "status": "In Progress", "assignee": { "name": "Nina Patel", "email": "nina.patel@example.com" }, "storyPoints": 3, "priority": "P3", "priorityLabel": "Low", "lastUpdated": "2026-07-24T09:00:00Z", "createdAt": "2026-07-25T09:00:00Z", "blockers": [], "acceptanceCriteria": "JWT signing keys rotate every 30 days with overlap window." }
+      ]
+    }
+  ],
+  "team": [
+    { "name": "Alice Chen", "email": "alice.chen@example.com", "role": "Engineer" },
+    { "name": "Bob Martinez", "email": "bob.martinez@example.com", "role": "Engineer" },
+    { "name": "Carol Singh", "email": "carol.singh@example.com", "role": "Engineer" },
+    { "name": "David Okonkwo", "email": "david.okonkwo@example.com", "role": "Engineer" },
+    { "name": "Priya Sharma", "email": "priya.sharma@example.com", "role": "Engineer" },
+    { "name": "Maria Lopez", "email": "maria.lopez@example.com", "role": "Engineer" },
+    { "name": "Tom Yang", "email": "tom.yang@example.com", "role": "Engineer" },
+    { "name": "Sara Iqbal", "email": "sara.iqbal@example.com", "role": "Engineer" },
+    { "name": "Eve Kapoor", "email": "eve.kapoor@example.com", "role": "Engineer" },
+    { "name": "Nina Patel", "email": "nina.patel@example.com", "role": "Engineer" }
+  ]
+}

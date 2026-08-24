@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+backend/.env
+backend/health_history.json
+backend/health_history.json.lock
+backend/user_projects.json
+backend/user_projects.json.lock
+backend/slack_config.json
+
+# Node
+node_modules/
+dist/
+frontend/.env
+frontend/.env.local
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
