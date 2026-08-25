@@ -5,7 +5,7 @@ const STORAGE_KEY = 'sprint-agent-theme'
 
 function getInitialTheme() {
   const saved = localStorage.getItem(STORAGE_KEY)
-  return saved === 'light' || saved === 'dark' ? saved : 'dark'
+  return saved === 'light' || saved === 'dark' ? saved : 'light'
 }
 
 export function ThemeProvider({ children }) {
