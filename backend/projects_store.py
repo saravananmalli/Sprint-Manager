@@ -69,6 +69,7 @@ def _project_from_row(row, tickets):
         "prefix": row["prefix"],
         "jiraBoardId": row.get("jira_board_id"),
         "jiraSprintId": row.get("jira_sprint_id"),
+        "isSeed": row.get("is_seed", False),
         "tickets": tickets,
     }
 
@@ -141,6 +142,29 @@ def get_activity_log(project_id):
         .execute()
     )
     return [_activity_from_row(r) for r in resp.data]
+
+
+def get_activity_logs_batch(project_ids, limit_per_project=50):
+    """Like get_activity_log, but for many projects in a single query —
+    used by team_insights.list_team, which otherwise fires one query per
+    project per team member. Approximate per-project cap (bounded by the
+    overall LIMIT below, not a per-project window function), which is fine
+    for its one caller: team-page "recent activity" only ever keeps the top
+    5 after combining, so a large shared limit is more than enough."""
+    if not project_ids:
+        return {}
+    resp = (
+        _client.table("activity_log")
+        .select("*")
+        .in_("project_id", project_ids)
+        .order("at", desc=True)
+        .limit(limit_per_project * len(project_ids))
+        .execute()
+    )
+    by_project = {pid: [] for pid in project_ids}
+    for row in resp.data:
+        by_project.setdefault(row["project_id"], []).append(_activity_from_row(row))
+    return by_project
 
 
 def append_activity(project_id, entry):

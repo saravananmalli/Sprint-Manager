@@ -140,14 +140,19 @@ runs: dict[str, RunState] = {}
 latest_results: dict[str, dict] = {}
 
 
-def _project_summary(project_id, now=None):
-    project = projects_store.get_project(project_id)
+def _project_summary(project_id, now=None, project=None, team=None, thresholds=None):
+    """`project`/`team`/`thresholds` are optional pre-fetched inputs — pass
+    them when summarizing multiple projects in one request (see
+    list_projects) so each call doesn't re-hit Supabase for the same data."""
+    project = project or projects_store.get_project(project_id)
+    team = team if team is not None else projects_store.get_team()
+    thresholds = thresholds or runtime_settings.get_thresholds()
     snapshot = agent_runner.build_sprint_snapshot(project, now=now)
     health = health_score.compute_health_score(snapshot["tickets"])
     at_risk = [t for t in snapshot["tickets"] if t["riskTags"]]
     at_risk_members = sum(
-        1 for m in projects_store.get_team()
-        if team_insights.member_summary(m["email"], project_id=project_id)["riskLevel"] in ("MEDIUM", "HIGH")
+        1 for m in team
+        if team_insights.member_risk_level([project], m["email"], thresholds) in ("MEDIUM", "HIGH")
     )
     return {
         "id": project["id"],
@@ -162,7 +167,7 @@ def _project_summary(project_id, now=None):
         "atRiskCount": len(at_risk),
         "atRiskMembers": at_risk_members,
         "ticketSource": snapshot["ticketSource"],
-        "custom": projects_store.is_user_created(project_id),
+        "custom": not project.get("isSeed", False),
     }
 
 
@@ -170,7 +175,16 @@ def _project_summary(project_id, now=None):
 
 @app.get("/api/projects")
 def list_projects():
-    summaries = [_project_summary(pid) for pid in projects_store.list_project_ids()]
+    # Batch-fetch once and pass down — was previously N separate
+    # get_project/get_team calls (one full re-fetch per project), each of
+    # which also fanned out into a get_project-per-team-member loop.
+    projects = projects_store.all_projects()
+    team = projects_store.get_team()
+    thresholds = runtime_settings.get_thresholds()
+    summaries = [
+        _project_summary(p["id"], project=p, team=team, thresholds=thresholds)
+        for p in projects
+    ]
     return {
         "projects": summaries,
         "totalProjects": len(summaries),
@@ -241,7 +255,7 @@ def post_create_project(body: ProjectCreateRequest):
         start_date=body.startDate, end_date=body.endDate, prefix=body.prefix.upper(),
         tickets=tickets, channel=body.channel,
     )
-    return _project_summary(project["id"])
+    return _project_summary(project["id"], project=project)
 
 
 @app.post("/api/projects/import")
@@ -270,7 +284,7 @@ async def post_import_project(
         start_date=startDate, end_date=endDate, prefix=prefix.strip().upper(),
         tickets=tickets, channel=channel,
     )
-    return _project_summary(project["id"])
+    return _project_summary(project["id"], project=project)
 
 
 @app.delete("/api/projects/{project_id}")

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from supabase import create_client
 
 import projects_store
+import runtime_settings
 import team_insights
 
 _client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
@@ -58,11 +59,15 @@ def mark_run(project_id):
 
 
 def escalations():
+    # Fetch once, use the lightweight risk-only helper — was previously a
+    # get_team() + full member_summary() call per project per member.
+    team = projects_store.get_team()
+    thresholds = runtime_settings.get_thresholds()
     rows = []
     for project in projects_store.all_projects():
         high_risk_count = sum(
-            1 for member in projects_store.get_team()
-            if team_insights.member_summary(member["email"], project_id=project["id"])["riskLevel"] == "HIGH"
+            1 for member in team
+            if team_insights.member_risk_level([project], member["email"], thresholds) == "HIGH"
         )
         rows.append({"projectId": project["id"], "projectName": project["name"], "highRiskCount": high_risk_count})
     return rows

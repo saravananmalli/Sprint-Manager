@@ -32,17 +32,15 @@ def _member_tickets(project, email):
     return [t for t in project["tickets"] if t.get("assignee", {}).get("email") == email]
 
 
-def _tag_projects_for_member(email):
-    return [p["name"] for p in projects_store.all_projects() if _member_tickets(p, email)]
-
-
-def _recent_activity(email, projects, limit=5):
+def _recent_activity(email, projects, activity_by_project, limit=5):
     """Kanban activity entries for tickets this member owns, newest first,
-    across every project passed in (already scoped by the caller)."""
+    across every project passed in (already scoped by the caller).
+    `activity_by_project` is pre-fetched (batched across all projects, once
+    per request) rather than queried here per member — see list_team."""
     events = []
     for project in projects:
         owned_ids = {t["id"] for t in _member_tickets(project, email)}
-        for entry in projects_store.get_activity_log(project["id"]):
+        for entry in activity_by_project.get(project["id"], []):
             if entry["ticketId"] in owned_ids:
                 events.append({**entry, "projectName": project["name"]})
     events.sort(key=lambda e: e["at"], reverse=True)
@@ -74,12 +72,34 @@ def _nudges_received(email, projects, latest_results, limit=5):
     return received[:limit]
 
 
-def member_summary(email, project_id=None, latest_results=None):
-    projects = [projects_store.get_project(project_id)] if project_id else projects_store.all_projects()
-    thresholds = runtime_settings.get_thresholds()
+def _member_tagged_tickets(projects, email, thresholds):
     tickets = []
     for project in projects:
         tickets.extend(risk_engine.tag_tickets(_member_tickets(project, email), thresholds=thresholds))
+    return tickets
+
+
+def member_risk_level(projects, email, thresholds):
+    """Cheap, Supabase-free risk level for a member across the given
+    (already-fetched) projects — used where only the risk level is needed
+    (e.g. main.py's per-project "at-risk members" count) so callers don't
+    pay for full member_summary's activity/nudges lookups just to get one
+    field."""
+    at_risk_count = sum(1 for t in _member_tagged_tickets(projects, email, thresholds) if t["riskTags"])
+    return "HIGH" if at_risk_count >= 3 else "MEDIUM" if at_risk_count >= 1 else "LOW"
+
+
+def member_summary(email, project_id=None, latest_results=None, projects=None, activity_by_project=None, thresholds=None):
+    """`projects`/`activity_by_project`/`thresholds` are optional pre-fetched
+    inputs — pass them when calling this for multiple members in one request
+    (see list_team) so each call doesn't re-hit Supabase for the same data."""
+    if projects is None:
+        projects = [projects_store.get_project(project_id)] if project_id else projects_store.all_projects()
+    if activity_by_project is None:
+        activity_by_project = projects_store.get_activity_logs_batch([p["id"] for p in projects])
+    if thresholds is None:
+        thresholds = runtime_settings.get_thresholds()
+    tickets = _member_tagged_tickets(projects, email, thresholds)
 
     done = sum(1 for t in tickets if t["status"] == "Done")
     points_done = sum(t["storyPoints"] for t in tickets if t["status"] == "Done")
@@ -112,15 +132,26 @@ def member_summary(email, project_id=None, latest_results=None):
         "reasons": reasons,
         "suggestedActions": actions,
         "todayTasks": today_tasks,
-        "recentActivity": _recent_activity(email, projects),
+        "recentActivity": _recent_activity(email, projects, activity_by_project),
         "nudgesReceived": _nudges_received(email, projects, latest_results),
     }
 
 
 def list_team(project_id=None, latest_results=None):
+    """Fetches projects/activity/thresholds once for the whole roster,
+    instead of once per member — was previously O(members × projects)
+    Supabase round-trips (fine against the old in-memory store, not fine
+    now that each call is a real network request)."""
+    projects = [projects_store.get_project(project_id)] if project_id else projects_store.all_projects()
+    activity_by_project = projects_store.get_activity_logs_batch([p["id"] for p in projects])
+    thresholds = runtime_settings.get_thresholds()
+
     roster = []
     for member in projects_store.get_team():
-        member_projects = _tag_projects_for_member(member["email"])
-        summary = member_summary(member["email"], project_id=project_id, latest_results=latest_results)
+        member_projects = [p["name"] for p in projects if _member_tickets(p, member["email"])]
+        summary = member_summary(
+            member["email"], project_id=project_id, latest_results=latest_results,
+            projects=projects, activity_by_project=activity_by_project, thresholds=thresholds,
+        )
         roster.append({**member, "projects": member_projects, **summary})
     return roster
