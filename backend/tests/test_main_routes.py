@@ -9,15 +9,24 @@ import projects_store
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(projects_store, "USER_PROJECTS_PATH", str(tmp_path / "user_projects.json"))
-    monkeypatch.setattr(projects_store, "USER_PROJECTS_LOCK", str(tmp_path / "user_projects.json.lock"))
-    before_ids = set(projects_store._projects.keys())
+def client():
+    """Track project/team-member rows created during a test and clean them
+    up afterward (tests run against the same Supabase project the app uses,
+    so cleanup must be precise, not a blanket truncate), then restore the
+    default seed project — several webhook tests below mutate its tickets
+    (e.g. CHK-105) and rely on starting from a known seed state each time."""
+    before_ids = set(projects_store.list_project_ids())
+    before_emails = {m["email"] for m in projects_store.get_team()}
     with TestClient(main.app) as c:
         yield c
-    for pid in set(projects_store._projects.keys()) - before_ids:
-        projects_store._projects.pop(pid, None)
-        projects_store._activity_log.pop(pid, None)
+    for pid in set(projects_store.list_project_ids()) - before_ids:
+        try:
+            projects_store.delete_project(pid)
+        except ValueError:
+            pass
+    after_emails = {m["email"] for m in projects_store.get_team()}
+    for email in after_emails - before_emails:
+        projects_store._client.table("team_members").delete().eq("email", email).execute()
     projects_store.reset_project(projects_store.default_project_id())
 
 

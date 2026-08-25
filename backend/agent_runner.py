@@ -9,11 +9,18 @@ from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 
+# Must run before importing our own modules: health_score/projects_store/
+# runtime_settings read SUPABASE_URL etc. from os.environ at import time.
+# Needed here (not just in main.py) since this file also runs standalone
+# via `python agent_runner.py ...`, which doesn't go through main.py first.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 import health_score
 import jira_client
 import nudge_generator
 import projects_store
 import risk_engine
+import runtime_settings
 import slack_sender
 import summary_generator
 
@@ -27,7 +34,7 @@ def build_sprint_snapshot(project, now=None):
     velocity (deterministic, no LLM)."""
     now = now or datetime.now(timezone.utc)
     tickets, source = jira_client.load_tickets(project)
-    tagged_tickets = risk_engine.tag_tickets(tickets, now=now)
+    tagged_tickets = risk_engine.tag_tickets(tickets, now=now, thresholds=runtime_settings.get_thresholds())
 
     if source == "live":
         total_committed = sum(t.get("storyPoints", 0) for t in tickets)

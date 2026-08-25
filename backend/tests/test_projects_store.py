@@ -1,25 +1,27 @@
-import json
-
 import pytest
 
 import projects_store
 
 
 @pytest.fixture
-def isolated_user_store(tmp_path, monkeypatch):
-    """Redirect user-project persistence to a scratch file so tests never
-    touch the real backend/user_projects.json, and undo any in-memory
-    project mutation after the test."""
-    path = tmp_path / "user_projects.json"
-    monkeypatch.setattr(projects_store, "USER_PROJECTS_PATH", str(path))
-    monkeypatch.setattr(projects_store, "USER_PROJECTS_LOCK", str(path) + ".lock")
-    before_ids = set(projects_store._projects.keys())
-    before_team = list(projects_store._team)
-    yield path
-    for pid in set(projects_store._projects.keys()) - before_ids:
-        projects_store._projects.pop(pid, None)
-        projects_store._activity_log.pop(pid, None)
-    projects_store._team[:] = before_team
+def isolated_user_store():
+    """Track any project (and any team member) created during the test and
+    remove it afterward — deleting a project cascades to its tickets/
+    health_history/activity_log rows in Supabase, but team_members has no
+    FK to projects, so new members are cleaned up separately. Never touches
+    seed data or truncates a table, since tests run against the same
+    Supabase project the app uses."""
+    before_ids = set(projects_store.list_project_ids())
+    before_emails = {m["email"] for m in projects_store.get_team()}
+    yield
+    for pid in set(projects_store.list_project_ids()) - before_ids:
+        try:
+            projects_store.delete_project(pid)
+        except ValueError:
+            pass
+    after_emails = {m["email"] for m in projects_store.get_team()}
+    for email in after_emails - before_emails:
+        projects_store._client.table("team_members").delete().eq("email", email).execute()
 
 
 TICKETS = [
@@ -38,8 +40,8 @@ def test_create_project_computes_totals_and_persists(isolated_user_store):
     assert project["id"] == "new-squad"
     assert project["totalCommitted"] == 8
     assert project["pointsDone"] == 3
-    assert projects_store.get_project("new-squad") is project
-    assert json.loads(isolated_user_store.read_text())[0]["id"] == "new-squad"
+    assert projects_store.get_project("new-squad") == project
+    assert projects_store.is_user_created("new-squad") is True
 
 
 def test_create_project_dedupes_id_on_name_collision(isolated_user_store):
@@ -84,7 +86,6 @@ def test_delete_project_removes_user_created(isolated_user_store):
     projects_store.delete_project(project["id"])
     with pytest.raises(KeyError):
         projects_store.get_project(project["id"])
-    assert json.loads(isolated_user_store.read_text()) == []
 
 
 def test_delete_project_rejects_seed_projects(isolated_user_store):
@@ -100,3 +101,21 @@ def test_reset_project_rejects_user_created(isolated_user_store):
     )
     with pytest.raises(ValueError, match="no seed data"):
         projects_store.reset_project(project["id"])
+
+
+def test_reset_project_restores_seed_tickets(isolated_user_store):
+    seed_id = projects_store.default_project_id()
+    original = projects_store.get_project(seed_id)
+    ticket_id = original["tickets"][0]["id"]
+
+    projects_store.update_ticket(seed_id, ticket_id, status="Done", last_updated="2026-08-20T00:00:00Z")
+    projects_store.append_activity(seed_id, {
+        "ticketId": ticket_id, "from": "Backlog", "to": "Done",
+        "event": "manual.move", "actor": "test", "at": "2026-08-20T00:00:00Z",
+    })
+
+    restored = projects_store.reset_project(seed_id)
+    restored_ticket = next(t for t in restored["tickets"] if t["id"] == ticket_id)
+    original_ticket = next(t for t in original["tickets"] if t["id"] == ticket_id)
+    assert restored_ticket["status"] == original_ticket["status"]
+    assert projects_store.get_activity_log(seed_id) == []

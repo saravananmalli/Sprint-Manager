@@ -94,11 +94,11 @@ A feature moves through six stages. Each stage names the **artefact produced** a
 └────────────┬───────────────────────────────────────────┬────────────────────────┘
              │                                           │
    ┌─────────▼──────────┐                ┌───────────────▼────────────────────┐
-   │  Anthropic API      │                │  Persistence (JSON files)          │
-   │  claude-sonnet-4-6  │                │  projects_data.json (seed, RO),    │
-   └─────────────────────┘                │  user_projects.json (created),     │
-   ┌─────────────────────┐                │  health_history.json,              │
-   │  Live Jira (opt-in) │                │  slack_config.json                 │
+   │  Anthropic API      │                │  Persistence (Supabase/Postgres)   │
+   │  claude-sonnet-4-6  │                │  projects, tickets, team_members,  │
+   └─────────────────────┘                │  health_history, slack_config,     │
+   ┌─────────────────────┐                │  runtime_settings, activity_log —  │
+   │  Live Jira (opt-in) │                │  see backend/migrations/           │
    │  Agile REST API     │                └────────────────────────────────────┘
    └─────────────────────┘                ┌────────────────────────────────────┐
    ┌─────────────────────┐                │  APScheduler (scheduler.py)        │
@@ -145,7 +145,7 @@ Rules of thumb:
 - **Domain modules** must stay pure — no Slack, no Claude, no HTTP. Tests in `backend/tests/` enforce this.
 - **External modules** must each define a fallback path for when their integration is offline.
 - **Routes** in `main.py` orchestrate — they call domain + external modules but contain no business rules themselves.
-- **`projects_store.py`** is the single source of truth for project/ticket state at runtime. Every other module reads tickets through it (directly, or via `jira_client.load_tickets`) — nothing else touches `projects_data.json` or `user_projects.json` directly.
+- **`projects_store.py`** is the source of truth for project/ticket state, backed by Supabase. Every other module reads tickets through it (directly, or via `jira_client.load_tickets`) — nothing else touches the database directly.
 
 
 ---
@@ -172,7 +172,7 @@ agent_runner.run_pipeline(project_id, steps=["all"])
   │                          → risk_engine.tag_tickets → health_score.compute_velocity
   ├─ nudge_generator.generate_nudges(snapshot)      ◀── Claude, one call per assignee
   ├─ summary_generator.generate_standup(snapshot)   ◀── Claude, 4-section digest
-  └─ health_score.compute_health_score + save_health_entry → health_history.json
+  └─ health_score.compute_health_score + save_health_entry → Supabase health_history table
   │
   ▼ result cached in main.latest_results[project_id]; run state in main.runs[run_id]
   ▼
@@ -203,7 +203,7 @@ Or:
   ├─ latest_results[project_id] = result
   ├─ agent_runner.post_to_slack(result, project_id, post_type="all")
   │    → slack_sender.send_health_score / send_standup / send_nudge
-  └─ slack_config.mark_run(project_id)   → slack_config.json { lastRun: { ... } }
+  └─ slack_config.mark_run(project_id)   → upserts a row in Supabase's slack_config table
 ```
 
 
@@ -248,19 +248,19 @@ KanbanPage.jsx renders as the "Automation activity" feed (in-memory, last 50).
 | [backend/main.py](backend/main.py) | FastAPI app + 26 REST routes; lifespan starts/stops the scheduler; in-memory run state | — | — (in-memory `runs`, `latest_results`) |
 | [backend/agent_runner.py](backend/agent_runner.py) | Orchestrates fetch → risk → nudge → standup → health; CLI entry point | — | — |
 | [backend/jira_client.py](backend/jira_client.py) | Live Jira Agile REST connector; falls back to mock/seed tickets on any failure | requests, JIRA_* env | — |
-| [backend/projects_store.py](backend/projects_store.py) | In-memory multi-project store — the runtime source of truth for tickets/team; create/delete/reset | filelock | user_projects.json |
+| [backend/projects_store.py](backend/projects_store.py) | Supabase-backed multi-project store — source of truth for tickets/team; create/delete/reset | supabase-py | Supabase: `projects`, `tickets`, `seed_tickets`, `team_members`, `activity_log` |
 | [backend/sprint_importer.py](backend/sprint_importer.py) | Parses an uploaded CSV into canonical tickets | — | — |
-| [backend/risk_engine.py](backend/risk_engine.py) | Velocity math + risk tagging (`STALE`, `STUCK`, `BLOCKED`, `UNASSIGNED`, `INCOMPLETE_AC`) | — | — |
-| [backend/health_score.py](backend/health_score.py) | Velocity/health-score math + trend + history persistence | filelock | health_history.json |
-| [backend/kanban.py](backend/kanban.py) | Kanban board assembly + automation rule engine (manual move / simulate / real webhook) | — | (via projects_store activity log) |
+| [backend/risk_engine.py](backend/risk_engine.py) | Velocity math + risk tagging (`STALE`, `STUCK`, `BLOCKED`, `UNASSIGNED`, `INCOMPLETE_AC`) — stays pure; thresholds are passed in by callers, never fetched here | — | — |
+| [backend/health_score.py](backend/health_score.py) | Velocity/health-score math + trend + history persistence | supabase-py | Supabase: `health_history` |
+| [backend/kanban.py](backend/kanban.py) | Kanban board assembly + automation rule engine (manual move / simulate / real webhook) | — | (via `projects_store.update_ticket` / `append_activity`) |
 | [backend/team_insights.py](backend/team_insights.py) | Per-member workload, risk level, deterministic (non-LLM) insight text | — | — |
 | [backend/reports.py](backend/reports.py) | Leadership report: deterministic text, PDF export, SMTP email | fpdf2, smtplib | — |
 | [backend/analytics.py](backend/analytics.py) | `/analytics` page data (risk distribution, points per assignee, etc.) | — | — |
 | [backend/nudge_generator.py](backend/nudge_generator.py) | Per-assignee nudge messages | Anthropic API, tenacity | — |
 | [backend/summary_generator.py](backend/summary_generator.py) | 4-section standup digest | Anthropic API, tenacity | — |
 | [backend/slack_sender.py](backend/slack_sender.py) | Slack delivery (webhook or bot token) | requests, SLACK_* env | — |
-| [backend/slack_config.py](backend/slack_config.py) | Scheduler status, per-project channel mapping, last-run tracking | — | slack_config.json |
-| [backend/runtime_settings.py](backend/runtime_settings.py) | Runtime-editable settings surfaced on `/settings` | — | — |
+| [backend/slack_config.py](backend/slack_config.py) | Scheduler status, per-project channel mapping, last-run tracking | supabase-py | Supabase: `slack_config` |
+| [backend/runtime_settings.py](backend/runtime_settings.py) | Runtime-editable settings surfaced on `/settings`; also exposes `get_thresholds()` (cached) for risk-tag thresholds | supabase-py | Supabase: `runtime_settings` |
 | [backend/scheduler.py](backend/scheduler.py) | Thin APScheduler wrapper — daily cron, generic `run_callback` | apscheduler | — |
 
 
@@ -309,7 +309,7 @@ Match these when adding new routes — note the two conventions that actually co
 | Long-running work | `/api/run` returns 202 immediately via `BackgroundTasks`; client polls `/api/run/status?run_id=`. Never block the request thread on Claude calls. |
 | Caching | `latest_results[project_id]` (in-memory, in `main.py`) holds the latest pipeline output. `/nudges` and `/reports/standup` read from it and return an empty/404 default if no run has happened yet. |
 | External call failures | Retry once with `tenacity` (Claude only), then return a fallback payload. Never raise to the route layer. Live Jira failures fall back to mock/seed tickets (§10.5); missing Slack/SMTP config returns `{"method": "skipped"}`-style payloads, not an error. |
-| File I/O | Always `FileLock`-protected when writing shared JSON (`health_history.json`, `user_projects.json`). `health_history.json` is bounded to 30 entries; `user_projects.json` is unbounded (one entry per created project). |
+| Persistence writes | All writes go through Supabase (via `supabase-py`) — Postgres transactions/upserts replace the old `FileLock`-protected JSON writes. `create_project` calls a single `create_project_with_tickets` Postgres RPC so the project + tickets + team-member rows commit atomically. `health_history` is capped at 30 entries **per project** (enforced by `health_score.save_health_entry` after each write); `activity_log` is capped at 50 per project at query time (`ORDER BY at DESC LIMIT 50`), not by deleting rows. |
 | Webhooks | `POST /api/webhooks/git` is the one route that reads the raw request body itself (for HMAC verification) instead of taking a Pydantic body param directly — see [kanban.py](backend/kanban.py) and §10.6. |
 
 
@@ -366,19 +366,23 @@ See [§5.1](#51-backend-modules) for which module each route calls.
 
 ### 7.2 Persistence map
 
+All state lives in Supabase (Postgres) — see `backend/migrations/0001_init_schema.sql` for the full DDL and `backend/migrations/seed_supabase.py` for the one-time script that loaded the original JSON seed data. Pre-migration JSON files are kept at `backend/legacy_json_backup/` as a rollback reference only; nothing in the app reads them.
 
-| File | Owner module | Bounded | Notes |
+| Table | Owner module | Bounded | Notes |
 | --- | --- | --- | --- |
-| `projects_data.json` | projects_store | — | Seed data. Read-only; `reset_project` reloads a project's tickets from here. Seed projects can't be deleted. |
-| `user_projects.json` | projects_store | unlimited | Projects created via `POST /api/projects` or `/api/projects/import`. Merged into memory alongside the seed on startup. |
-| `health_history.json` | health_score | 30 entries | One entry per project per day, keyed by date (not per-project file — see the gotcha below). |
-| `slack_config.json` | slack_config | — | `{ lastRun: { <project_id>: <iso timestamp> } }`. |
+| `projects` / `seed_tickets` | projects_store | — | `projects.is_seed` marks the 4 original seed projects (read-only origin; can't be deleted). `seed_tickets` is a read-only snapshot each seed project's original tickets — `reset_project` restores from here, replacing what the immutable JSON file used to provide "for free". |
+| `tickets` | projects_store | — | One row per ticket, `(project_id, id)` composite PK — ticket ids like `CHK-101` are only unique within a project, not globally. `riskTags` is never stored; still computed at read time by `risk_engine.tag_tickets`. |
+| `team_members` | projects_store | — | Global, not per-project (`GET /api/team` returns one shared list) — matches pre-migration behavior. |
+| `health_history` | health_score | 30 entries **per project** | `unique (project_id, date)`; `save_health_entry` upserts on that pair, then prunes each project's own history to 30 — see the fixed gotcha below. |
+| `slack_config` | slack_config | — | One row per project, `{project_id, last_run_at}` — replaces the old `{ lastRun: { <project_id>: ... } }` blob. |
+| `runtime_settings` | runtime_settings | — | Key/value rows for the 4 `EDITABLE_KEYS`; `get_thresholds()` caches a read (invalidated on write, 5s TTL) so `risk_engine.tag_tickets` callers don't round-trip to Supabase per ticket. |
+| `activity_log` | projects_store | 50 per project (query-time) | Per-ticket status-change history shown on Kanban. **New in the Supabase migration** — this was in-memory-only before (capped at 50, lost on every restart), never file-persisted; it's a genuine durability improvement, not a straight swap. |
 
 
-**Gotcha:** `health_history.json` is a single shared file, not `health_history_<pid>.json` — a run for any project appends/overwrites *today's* entry regardless of which project ran. If you need true per-project history, that's a real gap, not a documentation error.
+**Fixed gotcha:** the old `health_history.json` was a single shared file with a cap of 30 entries **across all projects combined** — a run for any project could evict another project's history. The Supabase migration fixed this: `health_history` now caps at 30 entries **per project** (`unique (project_id, date)` + a per-project prune query in `save_health_entry`).
 
 
-**Rule:** any new persistence must go in `backend/` as a JSON file with the same conventions (FileLock-protected write, bounded retention where it makes sense).
+**Rule:** any new persistent state must go in Supabase — add a table (or columns) to `backend/migrations/`, and thread it through the owning module's existing function API rather than querying Supabase directly from callers.
 
 
 ---
@@ -441,8 +445,8 @@ The pipeline is `agent_runner.run_pipeline`, called from `main._execute_run` (vi
 All risk rules live exclusively in [backend/risk_engine.py](backend/risk_engine.py). Do not duplicate them.
 
 
-1. Add the rule inside `tag_ticket(ticket, now, thresholds)`. Read any new threshold from `thresholds` (populated from `os.environ` in `_thresholds()`) — never hardcode.
-2. Update `.env.example` with the new env var and document it in [§10.1](#101-environment-variables).
+1. Add the rule inside `tag_ticket(ticket, now, thresholds)`. Read any new threshold from `thresholds` (`risk_engine.py` stays pure — it never fetches this itself; callers pass it in, sourced from `runtime_settings.get_thresholds()`) — never hardcode.
+2. If the rule needs a new configurable threshold: add it to `EDITABLE_KEYS` and `_DEFAULTS` in `runtime_settings.py`, add a seed row for it in `migrations/seed_supabase.py`, and include it in `get_thresholds()`'s returned dict. Document the default in `.env.example` (used only by the seed script) and [§10.1](#101-environment-variables).
 3. Add a test case to [backend/tests/test_risk_engine.py](backend/tests/test_risk_engine.py).
 4. Add the new tag to [frontend/src/utils/riskColors.js](frontend/src/utils/riskColors.js) — use a **full** Tailwind class string (no concatenation; Tailwind purges dynamic class names).
 
@@ -490,11 +494,12 @@ All env vars are read at runtime — never hardcoded. Authoritative list lives i
 
 | Var | Purpose |
 | --- | --- |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | **Required, always** — the persistence layer (§7.2). Hosted project or the Supabase CLI's local stack (`supabase start`). `projects_store.py`/`health_score.py`/`slack_config.py`/`runtime_settings.py` all construct their Supabase client at import time, so these must be set before `main.py`/`agent_runner.py` import them — both files call `load_dotenv()` before any other local import for exactly this reason. |
 | `ANTHROPIC_API_KEY` | Claude API key. If missing, nudges + standup fall back to deterministic templates. |
-| `USE_MOCK_DATA` | `true` (default): always use `projects_data.json` / `user_projects.json`. `false`: fetch live from Jira per-project (§10.5), falling back to mock/seed on any error. |
-| `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_BOARD_ID` / `JIRA_SPRINT_ID` | Live Jira credentials — board/sprint IDs are a global fallback; a project can override them via `jiraBoardId`/`jiraSprintId` (§10.5). |
+| `USE_MOCK_DATA` | Editable at runtime via the Settings page, stored in Supabase's `runtime_settings` table (not read from `.env` at request time — see §7.2). `true` (default): always use the seeded project/ticket data. `false`: fetch live from Jira per-project (§10.5), falling back to mock/seed on any error. The `.env`/`.env.example` value is only the initial row `migrations/seed_supabase.py` writes when bootstrapping a fresh Supabase project. |
+| `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_BOARD_ID` / `JIRA_SPRINT_ID` | Live Jira credentials — board/sprint IDs are a global fallback; a project can override them via the `projects.jira_board_id`/`jira_sprint_id` columns (§10.5). |
 | `JIRA_STORY_POINTS_FIELD` / `JIRA_AC_FIELD` | Jira custom field IDs — vary per instance. |
-| `STALE_THRESHOLD_HOURS` / `STUCK_THRESHOLD_PCT` / `SPRINT_TOTAL_DAYS` | Risk-tagging thresholds. Defaults 24 / 50 / 10. |
+| `STALE_THRESHOLD_HOURS` / `STUCK_THRESHOLD_PCT` / `SPRINT_TOTAL_DAYS` | Risk-tagging thresholds. Same Supabase-backed, runtime-editable pattern as `USE_MOCK_DATA` above — defaults 24 / 50 / 10. |
 | `SLACK_WEBHOOK_URL` / `SLACK_BOT_TOKEN` | Slack delivery. |
 | `GIT_WEBHOOK_SECRET` | Shared secret for `POST /api/webhooks/git` HMAC verification. Unset = unsigned/insecure (fine for local demo only) — see §10.6. |
 | `SCHEDULER_ENABLED` / `SCHEDULER_TIME_UTC` | Daily cron over all projects. Default `false` / `09:00`. See §10.5. |
@@ -556,20 +561,22 @@ npm run build                       # production bundle
 | `tests/test_summary_generator.py` | Fallback standup, 4-section structure. |
 | `tests/test_jira_client.py` | Issue-shape mapping, live-config resolution, auth/network fallback to mock. |
 | `tests/test_sprint_importer.py` | CSV parsing, column aliases, validation errors. |
-| `tests/test_projects_store.py` | Project create/delete/reset, ID collision handling, seed-project protection. |
-| `tests/test_main_routes.py` | Integration tests (FastAPI `TestClient`) for project create/import/delete and the git webhook (signature verification, eligible/ineligible tickets). |
+| `tests/test_projects_store.py` | Project create/delete/reset, ID collision handling, seed-project protection. Runs against the same Supabase project the app uses — each test tracks and cleans up only the rows it creates (never truncates a table or touches seed data). |
+| `tests/test_main_routes.py` | Integration tests (FastAPI `TestClient`) for project create/import/delete and the git webhook (signature verification, eligible/ineligible tickets). Same Supabase-cleanup pattern as above, plus restores the default seed project's tickets/activity after each test since the webhook tests mutate it. |
 
 
 **Every new domain module needs a matching test file.** Thin external wrappers (`slack_sender`, `nudge_generator`) don't need unit tests if they're pass-throughs — exercise them via a manual run instead.
+
+**Supabase-backed tests**: there's no disposable local Postgres/Supabase CLI stack wired up yet — tests run against the real Supabase project via `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`. Follow the existing pattern in `test_projects_store.py`/`test_main_routes.py`/`test_health_score.py`: track project ids and team-member emails that exist *before* the test, and after it delete only what the test itself created (`delete_project` cascades to that project's tickets/health_history/activity_log; `team_members` has no FK to a project, so clean those up separately by email). Never truncate a table or delete a seed project's data.
 
 
 ### 10.5 Live Jira
 
 
-Set `USE_MOCK_DATA=false` plus `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` in `backend/.env`. By default every project pulls from the same `JIRA_BOARD_ID`/`JIRA_SPRINT_ID`; a project can override this by setting its own `jiraBoardId` / `jiraSprintId` in `projects_data.json` or `user_projects.json`.
+Set `USE_MOCK_DATA=false` (via the Settings page — see §10.1) plus `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` in `backend/.env`. By default every project pulls from the same `JIRA_BOARD_ID`/`JIRA_SPRINT_ID`; a project can override this via the `jira_board_id`/`jira_sprint_id` columns on its `projects` row (surfaced to `jira_client.py` as `project["jiraBoardId"]`/`project["jiraSprintId"]`, same dict keys as before the Supabase migration).
 
 
-`jira_client.load_tickets(project)` returns `(tickets, source)` where `source` is `"live"` or `"mock"`. `agent_runner.build_sprint_snapshot` only recomputes `totalCommitted`/`pointsDone` from the ticket set when `source == "live"` — for mock/seed projects those numbers are curated by hand in `projects_data.json` and are **not** simply `sum(storyPoints)` (don't "fix" this without checking — it's intentional, see the comment in `jira_client.py`).
+`jira_client.load_tickets(project)` returns `(tickets, source)` where `source` is `"live"` or `"mock"`. `agent_runner.build_sprint_snapshot` only recomputes `totalCommitted`/`pointsDone` from the ticket set when `source == "live"` — for mock/seed projects those numbers were originally curated by hand in `projects_data.json` (now `backend/legacy_json_backup/projects_data.json`, loaded into Supabase once by `migrations/seed_supabase.py`) and are **not** simply `sum(storyPoints)` (don't "fix" this without checking — it's intentional, see the comment in `jira_client.py`).
 
 
 A live-mode run that fails (auth, network, empty sprint) logs the error and transparently falls back to that project's mock/seed tickets — it never surfaces as a pipeline error.
@@ -578,11 +585,11 @@ A live-mode run that fails (auth, network, empty sprint) logs the error and tran
 ### 10.6 Project import & webhooks
 
 
-**Creating projects** — two routes, both funnel into `projects_store.create_project` and persist to `user_projects.json`:
+**Creating projects** — two routes, both funnel into `projects_store.create_project`, which persists via the `create_project_with_tickets` Postgres RPC (a single transaction covering the `projects` row, its `tickets` rows, and any new `team_members` rows — see §7.2):
 - `POST /api/projects` — JSON body (name, teamSlug, sprintName, dates, prefix, optional `tickets[]`). An empty ticket list gets one starter ticket so the dashboard isn't blank.
 - `POST /api/projects/import` — multipart form + a `.csv` file (max 2MB), parsed by `sprint_importer.parse_csv`. Required columns: `id`, `summary`; everything else (`status`, `assigneeName`, `assigneeEmail`, `storyPoints`, `blockers` `;`-separated, `acceptanceCriteria`, `priority`) is optional with sane defaults.
 
-Seed projects (from `projects_data.json`) can't be deleted or have their ID collide with a new one — `create_project` slugifies the name and appends `-2`, `-3`, ... on collision. `DELETE /api/projects/{id}` refuses seed projects (400).
+Seed projects (`projects.is_seed = true`) can't be deleted or have their ID collide with a new one — `create_project` slugifies the name and appends `-2`, `-3`, ... on collision. `DELETE /api/projects/{id}` refuses seed projects (400) and, for a user-created project, cascades to delete its `tickets`/`health_history`/`activity_log`/`slack_config` rows too.
 
 **Real git webhook** — `POST /api/webhooks/git` with body `{project, event, ticketIds: [...], actor}`. If `GIT_WEBHOOK_SECRET` is set, the caller must send `X-Webhook-Signature: <hex hmac-sha256(secret, raw_body)>` or get a 401. This is intentionally a *different* code path from the "Simulate" buttons on `/kanban` (`kanban.simulate_event`, which picks the first eligible ticket for demo purposes) — the webhook (`kanban.apply_webhook_event`) transitions tickets by explicit ID and reports skipped/ineligible ones rather than erroring, since a single CI payload can reference tickets in different states.
 

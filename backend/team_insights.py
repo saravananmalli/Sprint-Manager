@@ -10,6 +10,7 @@ from datetime import date
 import health_score
 import projects_store
 import risk_engine
+import runtime_settings
 import slack_sender
 
 REASON_TEMPLATES = {
@@ -75,9 +76,10 @@ def _nudges_received(email, projects, latest_results, limit=5):
 
 def member_summary(email, project_id=None, latest_results=None):
     projects = [projects_store.get_project(project_id)] if project_id else projects_store.all_projects()
+    thresholds = runtime_settings.get_thresholds()
     tickets = []
     for project in projects:
-        tickets.extend(risk_engine.tag_tickets(_member_tickets(project, email)))
+        tickets.extend(risk_engine.tag_tickets(_member_tickets(project, email), thresholds=thresholds))
 
     done = sum(1 for t in tickets if t["status"] == "Done")
     points_done = sum(t["storyPoints"] for t in tickets if t["status"] == "Done")

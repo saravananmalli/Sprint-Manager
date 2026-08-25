@@ -1,100 +1,222 @@
-"""In-memory multi-project store, seeded from projects_data.json plus any
-user-created projects persisted in user_projects.json.
+"""Supabase-backed multi-project store.
 
-Mutations (kanban moves, automation events) happen in memory only;
-`reset_project` reloads a project's tickets from the seed file. Project
-*creation*/*deletion* (§ "project persistence") is persisted to disk so
-projects created via the UI survive a backend restart.
+Mutations (kanban moves, automation events, project create/delete) persist
+immediately to Supabase — there is no in-memory cache to keep in sync.
+`reset_project` restores a project's tickets from the read-only
+`seed_tickets` snapshot table (populated once by migrations/seed_supabase.py).
 """
 
-import copy
-import json
 import os
 import re
 
-from filelock import FileLock
+from supabase import create_client
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "projects_data.json")
-USER_PROJECTS_PATH = os.path.join(os.path.dirname(__file__), "user_projects.json")
-USER_PROJECTS_LOCK = USER_PROJECTS_PATH + ".lock"
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-with open(DATA_PATH, "r") as f:
-    _SEED = json.load(f)
-
-_projects = {p["id"]: copy.deepcopy(p) for p in _SEED["projects"]}
-_seed_ids = set(_projects.keys())
-_team = copy.deepcopy(_SEED["team"])
-_activity_log = {pid: [] for pid in _projects}
+_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
-def _load_user_projects():
-    if not os.path.exists(USER_PROJECTS_PATH):
-        return []
-    with open(USER_PROJECTS_PATH, "r") as f:
-        return json.load(f)
+def _ticket_from_row(row):
+    assignee = {}
+    if row.get("assignee_email") or row.get("assignee_name"):
+        assignee = {"name": row.get("assignee_name"), "email": row.get("assignee_email")}
+    return {
+        "id": row["id"],
+        "summary": row["summary"],
+        "status": row["status"],
+        "assignee": assignee,
+        "storyPoints": row.get("story_points", 0),
+        "priority": row.get("priority"),
+        "priorityLabel": row.get("priority_label"),
+        "lastUpdated": row.get("last_updated"),
+        "createdAt": row.get("created_at"),
+        "blockers": row.get("blockers") or [],
+        "acceptanceCriteria": row.get("acceptance_criteria", ""),
+    }
 
 
-def _save_user_projects(projects):
-    with open(USER_PROJECTS_PATH, "w") as f:
-        json.dump(projects, f, indent=2)
+def _ticket_row(project_id, ticket):
+    assignee = ticket.get("assignee") or {}
+    return {
+        "project_id": project_id,
+        "id": ticket["id"],
+        "summary": ticket["summary"],
+        "status": ticket["status"],
+        "assignee_name": assignee.get("name"),
+        "assignee_email": assignee.get("email"),
+        "story_points": ticket.get("storyPoints", 0),
+        "priority": ticket.get("priority"),
+        "priority_label": ticket.get("priorityLabel"),
+        "last_updated": ticket.get("lastUpdated"),
+        "created_at": ticket.get("createdAt"),
+        "blockers": ticket.get("blockers", []),
+        "acceptance_criteria": ticket.get("acceptanceCriteria", ""),
+    }
 
 
-for _p in _load_user_projects():
-    _projects[_p["id"]] = _p
-    _activity_log.setdefault(_p["id"], [])
+def _project_from_row(row, tickets):
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "teamSlug": row["team_slug"],
+        "channel": row["channel"],
+        "sprintName": row["sprint_name"],
+        "startDate": row["start_date"],
+        "endDate": row["end_date"],
+        "totalCommitted": row.get("total_committed", 0),
+        "pointsDone": row.get("points_done", 0),
+        "prefix": row["prefix"],
+        "jiraBoardId": row.get("jira_board_id"),
+        "jiraSprintId": row.get("jira_sprint_id"),
+        "tickets": tickets,
+    }
+
+
+def _activity_from_row(row):
+    return {
+        "ticketId": row.get("ticket_id"),
+        "from": row.get("from"),
+        "to": row.get("to"),
+        "event": row["event"],
+        "branch": row.get("branch"),
+        "actor": row["actor"],
+        "at": row.get("at"),
+    }
 
 
 def list_project_ids():
-    return list(_projects.keys())
+    resp = _client.table("projects").select("id").order("created_at").execute()
+    return [r["id"] for r in resp.data]
 
 
 def get_project(project_id):
-    if project_id not in _projects:
+    resp = _client.table("projects").select("*").eq("id", project_id).execute()
+    if not resp.data:
         raise KeyError(f"Unknown project '{project_id}'")
-    return _projects[project_id]
+    tickets_resp = _client.table("tickets").select("*").eq("project_id", project_id).execute()
+    tickets = [_ticket_from_row(r) for r in tickets_resp.data]
+    return _project_from_row(resp.data[0], tickets)
 
 
 def default_project_id():
-    return next(iter(_projects))
+    resp = (
+        _client.table("projects")
+        .select("id")
+        .order("created_at")
+        .order("id")
+        .limit(1)
+        .execute()
+    )
+    if not resp.data:
+        raise KeyError("No projects exist")
+    return resp.data[0]["id"]
 
 
 def all_projects():
-    return list(_projects.values())
+    projects_resp = _client.table("projects").select("*").order("created_at").execute()
+    project_rows = projects_resp.data
+    if not project_rows:
+        return []
+    ids = [p["id"] for p in project_rows]
+    tickets_resp = _client.table("tickets").select("*").in_("project_id", ids).execute()
+    tickets_by_project = {}
+    for t in tickets_resp.data:
+        tickets_by_project.setdefault(t["project_id"], []).append(_ticket_from_row(t))
+    return [_project_from_row(p, tickets_by_project.get(p["id"], [])) for p in project_rows]
 
 
 def get_team():
-    return _team
+    resp = _client.table("team_members").select("*").order("created_at").execute()
+    return [{"name": r["name"], "email": r["email"], "role": r["role"]} for r in resp.data]
 
 
 def get_activity_log(project_id):
-    return _activity_log.setdefault(project_id, [])
+    resp = (
+        _client.table("activity_log")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("at", desc=True)
+        .limit(50)
+        .execute()
+    )
+    return [_activity_from_row(r) for r in resp.data]
 
 
 def append_activity(project_id, entry):
-    log = _activity_log.setdefault(project_id, [])
-    log.insert(0, entry)
-    _activity_log[project_id] = log[:50]
+    _client.table("activity_log").insert(
+        {
+            "project_id": project_id,
+            "ticket_id": entry.get("ticketId"),
+            "from": entry.get("from"),
+            "to": entry.get("to"),
+            "event": entry["event"],
+            "branch": entry.get("branch"),
+            "actor": entry["actor"],
+            "at": entry.get("at"),
+        }
+    ).execute()
+
+
+def update_ticket(project_id, ticket_id, status=None, last_updated=None):
+    """Persist a field change to a ticket. Used by kanban.py, which previously
+    relied on mutating an in-memory dict by reference — that pattern doesn't
+    apply against a real datastore, so callers must go through this instead."""
+    updates = {}
+    if status is not None:
+        updates["status"] = status
+    if last_updated is not None:
+        updates["last_updated"] = last_updated
+    if not updates:
+        return find_ticket(project_id, ticket_id)
+    resp = (
+        _client.table("tickets")
+        .update(updates)
+        .eq("project_id", project_id)
+        .eq("id", ticket_id)
+        .execute()
+    )
+    if not resp.data:
+        raise KeyError(f"Unknown ticket '{ticket_id}' in project '{project_id}'")
+    return _ticket_from_row(resp.data[0])
 
 
 def reset_project(project_id):
-    if project_id not in _seed_ids:
+    resp = _client.table("projects").select("is_seed").eq("id", project_id).execute()
+    if not resp.data:
+        raise KeyError(f"Unknown project '{project_id}'")
+    if not resp.data[0]["is_seed"]:
         raise ValueError(f"Project '{project_id}' has no seed data to reset to")
-    seed = next(p for p in _SEED["projects"] if p["id"] == project_id)
-    _projects[project_id] = copy.deepcopy(seed)
-    _activity_log[project_id] = []
-    return _projects[project_id]
+
+    seed_resp = _client.table("seed_tickets").select("ticket_data").eq("project_id", project_id).execute()
+    seed_tickets = [row["ticket_data"] for row in seed_resp.data]
+
+    _client.table("tickets").delete().eq("project_id", project_id).execute()
+    if seed_tickets:
+        _client.table("tickets").insert([_ticket_row(project_id, t) for t in seed_tickets]).execute()
+    _client.table("activity_log").delete().eq("project_id", project_id).execute()
+
+    return get_project(project_id)
 
 
 def find_ticket(project_id, ticket_id):
-    project = get_project(project_id)
-    for ticket in project["tickets"]:
-        if ticket["id"] == ticket_id:
-            return ticket
-    raise KeyError(f"Unknown ticket '{ticket_id}' in project '{project_id}'")
+    resp = (
+        _client.table("tickets")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("id", ticket_id)
+        .execute()
+    )
+    if not resp.data:
+        raise KeyError(f"Unknown ticket '{ticket_id}' in project '{project_id}'")
+    return _ticket_from_row(resp.data[0])
 
 
 def is_user_created(project_id):
-    return project_id not in _seed_ids
+    resp = _client.table("projects").select("is_seed").eq("id", project_id).execute()
+    if not resp.data:
+        return True
+    return not resp.data[0]["is_seed"]
 
 
 def _slugify(name):
@@ -102,11 +224,16 @@ def _slugify(name):
     return slug or "project"
 
 
+def _project_exists(project_id):
+    resp = _client.table("projects").select("id").eq("id", project_id).limit(1).execute()
+    return bool(resp.data)
+
+
 def _unique_id(name):
     base = _slugify(name)
     candidate = base
     n = 2
-    while candidate in _projects:
+    while _project_exists(candidate):
         candidate = f"{base}-{n}"
         n += 1
     return candidate
@@ -118,48 +245,41 @@ def create_project(name, team_slug, sprint_name, start_date, end_date, prefix, t
     total_committed = sum(t.get("storyPoints", 0) for t in tickets)
     points_done = sum(t.get("storyPoints", 0) for t in tickets if t.get("status") == "Done")
 
-    project = {
-        "id": project_id,
-        "name": name,
-        "teamSlug": team_slug,
-        "channel": channel or team_slug,
-        "sprintName": sprint_name,
-        "startDate": start_date,
-        "endDate": end_date,
-        "totalCommitted": total_committed,
-        "pointsDone": points_done,
-        "prefix": prefix,
-        "tickets": tickets,
-    }
-
-    with FileLock(USER_PROJECTS_LOCK, timeout=10):
-        stored = _load_user_projects()
-        stored.append(project)
-        _save_user_projects(stored)
-
-    _projects[project_id] = project
-    _activity_log[project_id] = []
-
-    seen_emails = {m["email"] for m in _team}
+    seen_emails = set()
+    team_members = []
     for ticket in tickets:
         assignee = ticket.get("assignee") or {}
         email = assignee.get("email")
         if email and email not in seen_emails:
-            _team.append({"name": assignee.get("name", email), "email": email, "role": "Engineer"})
+            team_members.append({"email": email, "name": assignee.get("name", email), "role": "Engineer"})
             seen_emails.add(email)
 
-    return project
+    _client.rpc(
+        "create_project_with_tickets",
+        {
+            "p_id": project_id,
+            "p_name": name,
+            "p_team_slug": team_slug,
+            "p_channel": channel or team_slug,
+            "p_sprint_name": sprint_name,
+            "p_start_date": start_date,
+            "p_end_date": end_date,
+            "p_total_committed": total_committed,
+            "p_points_done": points_done,
+            "p_prefix": prefix,
+            "p_tickets": tickets,
+            "p_team_members": team_members,
+        },
+    ).execute()
+
+    return get_project(project_id)
 
 
 def delete_project(project_id):
-    if project_id not in _projects:
+    resp = _client.table("projects").select("is_seed").eq("id", project_id).execute()
+    if not resp.data:
         raise KeyError(f"Unknown project '{project_id}'")
-    if project_id in _seed_ids:
+    if resp.data[0]["is_seed"]:
         raise ValueError("Seed projects cannot be deleted")
-
-    with FileLock(USER_PROJECTS_LOCK, timeout=10):
-        stored = [p for p in _load_user_projects() if p["id"] != project_id]
-        _save_user_projects(stored)
-
-    del _projects[project_id]
-    _activity_log.pop(project_id, None)
+    # Cascades remove tickets/health_history/activity_log/slack_config rows too.
+    _client.table("projects").delete().eq("id", project_id).execute()

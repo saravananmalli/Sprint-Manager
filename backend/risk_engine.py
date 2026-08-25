@@ -54,10 +54,10 @@ def tag_ticket(ticket, now=None, thresholds=None):
     return tags
 
 
-def tag_tickets(tickets, now=None):
+def tag_tickets(tickets, now=None, thresholds=None):
     """Return a new list of tickets, each with a `riskTags` field populated."""
     now = now or _now()
-    thresholds = _thresholds()
+    thresholds = thresholds or _thresholds()
     tagged = []
     for ticket in tickets:
         t = dict(ticket)

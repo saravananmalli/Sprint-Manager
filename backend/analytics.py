@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import health_score
 import projects_store
 import risk_engine
+import runtime_settings
 
 RISK_LABELS = {
     "STALE": "Stale",
@@ -64,7 +65,7 @@ def velocity_prediction(project, now=None):
 def build_analytics(project_id, now=None):
     now = now or datetime.now(timezone.utc)
     project = projects_store.get_project(project_id)
-    tickets = risk_engine.tag_tickets(project["tickets"], now=now)
+    tickets = risk_engine.tag_tickets(project["tickets"], now=now, thresholds=runtime_settings.get_thresholds())
     return {
         "riskDistribution": risk_distribution(tickets),
         "pointsPerAssignee": points_per_assignee(tickets),

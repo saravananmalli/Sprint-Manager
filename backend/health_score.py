@@ -1,15 +1,15 @@
 """Velocity math, sprint status, health score, and trend computation
-(§11.1, §11.2, §11.4, §11.5) plus health_history.json persistence (§11.8, §14.2)."""
+(§11.1, §11.2, §11.4, §11.5) plus Supabase-backed health_history persistence
+(§11.8, §14.2)."""
 
-import json
 import os
-from datetime import date, datetime, timezone
+from datetime import date
 
-from filelock import FileLock
+from supabase import create_client
 
-HISTORY_PATH = os.path.join(os.path.dirname(__file__), "health_history.json")
-LOCK_PATH = HISTORY_PATH + ".lock"
 MAX_HISTORY_ENTRIES = 30
+
+_client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
 
 def _today():
@@ -101,30 +101,72 @@ def compute_trend(history):
     return "Stable"
 
 
+def _history_entry_from_row(row):
+    return {
+        "date": row["date"],
+        "projectId": row["project_id"],
+        "score": row.get("score"),
+        "components": {
+            "velocityScore": row.get("velocity_score"),
+            "blockerScore": row.get("blocker_score"),
+            "stalenessScore": row.get("staleness_score"),
+            "completionScore": row.get("completion_score"),
+        },
+        "sprintStatus": row.get("sprint_status"),
+        "ticketsAtRisk": row.get("tickets_at_risk"),
+        "runId": row.get("run_id"),
+        "createdAt": row.get("created_at"),
+    }
+
+
 def load_history(project_id=None):
-    if not os.path.exists(HISTORY_PATH):
-        return []
-    with open(HISTORY_PATH, "r") as f:
-        history = json.load(f)
+    query = _client.table("health_history").select("*").order("date")
     if project_id is not None:
-        history = [h for h in history if h.get("projectId") == project_id]
-    return history
+        query = query.eq("project_id", project_id)
+    resp = query.execute()
+    return [_history_entry_from_row(r) for r in resp.data]
 
 
 def save_health_entry(entry):
-    """Insert/overwrite today's entry for this project, sort ascending by
-    date, prune to MAX_HISTORY_ENTRIES, and write back under a file lock
-    (§11.8). Entries are keyed by (date, projectId) so same-day runs from
-    different projects don't clobber each other."""
-    with FileLock(LOCK_PATH, timeout=10):
-        history = load_history()
-        history = [
-            h for h in history
-            if not (h["date"] == entry["date"] and h.get("projectId") == entry.get("projectId"))
-        ]
-        history.append(entry)
-        history.sort(key=lambda h: h["date"])
-        history = history[-MAX_HISTORY_ENTRIES:]
-        with open(HISTORY_PATH, "w") as f:
-            json.dump(history, f, indent=2)
-    return history
+    """Upsert today's entry for this project (keyed on (project_id, date) so
+    same-day runs from different projects don't clobber each other), then
+    prune that project's history to MAX_HISTORY_ENTRIES — a per-project cap,
+    not the legacy JSON file's global-across-all-projects cap."""
+    components = entry.get("components") or {}
+    project_id = entry["projectId"]
+    row = {
+        "project_id": project_id,
+        "date": entry["date"],
+        "score": entry.get("score"),
+        "velocity_score": components.get("velocityScore"),
+        "blocker_score": components.get("blockerScore"),
+        "staleness_score": components.get("stalenessScore"),
+        "completion_score": components.get("completionScore"),
+        "sprint_status": entry.get("sprintStatus"),
+        "tickets_at_risk": entry.get("ticketsAtRisk"),
+        "run_id": entry.get("runId"),
+    }
+    if entry.get("createdAt"):
+        row["created_at"] = entry["createdAt"]
+    _client.table("health_history").upsert(row, on_conflict="project_id,date").execute()
+
+    kept = (
+        _client.table("health_history")
+        .select("id")
+        .eq("project_id", project_id)
+        .order("date", desc=True)
+        .limit(MAX_HISTORY_ENTRIES)
+        .execute()
+    )
+    keep_ids = {r["id"] for r in kept.data}
+    all_ids = (
+        _client.table("health_history")
+        .select("id")
+        .eq("project_id", project_id)
+        .execute()
+    )
+    stale_ids = [r["id"] for r in all_ids.data if r["id"] not in keep_ids]
+    if stale_ids:
+        _client.table("health_history").delete().in_("id", stale_ids).execute()
+
+    return load_history(project_id)

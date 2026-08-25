@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 import projects_store
 import risk_engine
+import runtime_settings
 
 COLUMNS = ["Backlog", "In Progress", "Testing", "In Review", "Done"]
 
@@ -39,8 +40,9 @@ def column_for(status):
 
 def build_board(project_id):
     project = projects_store.get_project(project_id)
+    thresholds = runtime_settings.get_thresholds()
     board = {col: [] for col in COLUMNS}
-    for ticket in risk_engine.tag_tickets(project["tickets"]):
+    for ticket in risk_engine.tag_tickets(project["tickets"], thresholds=thresholds):
         board[column_for(ticket["status"])].append(ticket)
     return {
         "columns": [{"name": col, "tickets": board[col]} for col in COLUMNS],
@@ -70,8 +72,8 @@ def simulate_event(project_id, event, ticket_id=None, actor="demo-bot"):
             raise ValueError(f"No ticket currently in {rule['from']} to advance")
 
     from_column = column_for(ticket["status"])
-    ticket["status"] = rule["to"]
-    ticket["lastUpdated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ticket = projects_store.update_ticket(project_id, ticket["id"], status=rule["to"], last_updated=last_updated)
 
     branch = f"feature/{ticket['id'].lower()}-{ticket['summary'].lower().replace(' ', '-')[:32]}"
     entry = {
@@ -113,8 +115,8 @@ def apply_webhook_event(project_id, event, ticket_ids, actor="webhook"):
             skipped.append({"ticketId": ticket_id, "reason": f"not in {rule['from']} (currently {from_column})"})
             continue
 
-        ticket["status"] = rule["to"]
-        ticket["lastUpdated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ticket = projects_store.update_ticket(project_id, ticket["id"], status=rule["to"], last_updated=last_updated)
         entry = {
             "ticketId": ticket["id"],
             "from": from_column,
@@ -135,8 +137,9 @@ def move_ticket(project_id, ticket_id, to_column, actor="you"):
         raise ValueError(f"Unknown column '{to_column}'")
     ticket = projects_store.find_ticket(project_id, ticket_id)
     from_column = column_for(ticket["status"])
-    ticket["status"] = "Backlog" if to_column == "Backlog" else to_column
-    ticket["lastUpdated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    new_status = "Backlog" if to_column == "Backlog" else to_column
+    last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ticket = projects_store.update_ticket(project_id, ticket["id"], status=new_status, last_updated=last_updated)
 
     entry = {
         "ticketId": ticket["id"],

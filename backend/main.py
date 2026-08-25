@@ -11,6 +11,14 @@ from datetime import datetime, timezone
 from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
+
+# Must run before importing our own modules: projects_store/health_score/
+# slack_config/runtime_settings read SUPABASE_URL etc. from os.environ at
+# import time (module-level Supabase client construction), so .env has to be
+# loaded first — unlike the JSON-file modules they replaced, which had no
+# env-var dependency at import time.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +40,6 @@ import slack_sender
 import sprint_importer
 import team_insights
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(message)s",

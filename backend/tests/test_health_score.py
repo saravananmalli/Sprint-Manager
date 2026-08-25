@@ -1,6 +1,17 @@
-from datetime import date
+from datetime import date, timedelta
 
 import health_score
+import projects_store
+
+
+def _make_project(name, prefix):
+    """health_history.project_id is a real FK to projects(id), so these
+    tests need an actual (temporary) project row to write entries against."""
+    return projects_store.create_project(
+        name=name, team_slug=prefix.lower(), sprint_name="S1",
+        start_date="2026-01-01", end_date="2026-01-10", prefix=prefix,
+        tickets=[{"id": f"{prefix}-1", "summary": "x", "status": "Todo", "storyPoints": 1}],
+    )
 
 
 def test_compute_velocity_midpoint():
@@ -64,47 +75,51 @@ def test_compute_trend_stable_with_fewer_than_two_entries():
     assert health_score.compute_trend([{"date": "2026-08-01", "score": 50}]) == "Stable"
 
 
-def test_save_health_entry_overwrites_same_date_and_prunes(tmp_path, monkeypatch):
-    history_file = tmp_path / "health_history.json"
-    monkeypatch.setattr(health_score, "HISTORY_PATH", str(history_file))
-    monkeypatch.setattr(health_score, "LOCK_PATH", str(history_file) + ".lock")
+def test_save_health_entry_overwrites_same_date_and_prunes():
+    # Per-project cap (Supabase migration fix — the legacy JSON file capped
+    # at MAX_HISTORY_ENTRIES *globally* across all projects combined, a
+    # confirmed bug; each project now keeps its own 30-entry history).
+    project = _make_project("HS Prune Test", "HSP")
+    project_id = project["id"]
+    dates = [(date(2026, 1, 1) + timedelta(days=i)).isoformat() for i in range(32)]
+    try:
+        for i, d in enumerate(dates):
+            health_score.save_health_entry({"date": d, "projectId": project_id, "score": i + 1})
 
-    for day in range(1, 33):
-        health_score.save_health_entry({"date": f"2026-01-{day:02d}", "score": day})
+        # 32 distinct dates written; oldest 2 should be pruned to MAX_HISTORY_ENTRIES
+        history = health_score.load_history(project_id)
+        assert len(history) == health_score.MAX_HISTORY_ENTRIES
+        assert history[0]["date"] == dates[2]
+        assert history[-1]["date"] == dates[-1]
+        assert history == sorted(history, key=lambda h: h["date"])
 
-    # 32 distinct dates written; oldest 2 should be pruned to MAX_HISTORY_ENTRIES
-    history = health_score.load_history()
-    assert len(history) == health_score.MAX_HISTORY_ENTRIES
-    assert history[0]["date"] == "2026-01-03"
-    assert history[-1]["date"] == "2026-01-32"
-    assert history == sorted(history, key=lambda h: h["date"])
-
-    health_score.save_health_entry({"date": "2026-01-32", "score": 999})
-    history = health_score.load_history()
-    assert len(history) == health_score.MAX_HISTORY_ENTRIES
-    assert history[-1]["score"] == 999
+        health_score.save_health_entry({"date": dates[-1], "projectId": project_id, "score": 999})
+        history = health_score.load_history(project_id)
+        assert len(history) == health_score.MAX_HISTORY_ENTRIES
+        assert history[-1]["score"] == 999
+    finally:
+        projects_store.delete_project(project_id)
 
 
-def test_save_health_entry_isolates_by_project(tmp_path, monkeypatch):
-    history_file = tmp_path / "health_history.json"
-    monkeypatch.setattr(health_score, "HISTORY_PATH", str(history_file))
-    monkeypatch.setattr(health_score, "LOCK_PATH", str(history_file) + ".lock")
+def test_save_health_entry_isolates_by_project():
+    project_a = _make_project("HS Iso A", "HSA")
+    project_b = _make_project("HS Iso B", "HSB")
+    try:
+        health_score.save_health_entry({"date": "2026-02-01", "projectId": project_a["id"], "score": 40})
+        health_score.save_health_entry({"date": "2026-02-01", "projectId": project_b["id"], "score": 90})
 
-    health_score.save_health_entry({"date": "2026-02-01", "projectId": "proj-a", "score": 40})
-    health_score.save_health_entry({"date": "2026-02-01", "projectId": "proj-b", "score": 90})
+        proj_a_history = health_score.load_history(project_a["id"])
+        assert len(proj_a_history) == 1
+        assert proj_a_history[0]["score"] == 40
 
-    all_history = health_score.load_history()
-    assert len(all_history) == 2
+        proj_b_history = health_score.load_history(project_b["id"])
+        assert len(proj_b_history) == 1
+        assert proj_b_history[0]["score"] == 90
 
-    proj_a_history = health_score.load_history("proj-a")
-    assert len(proj_a_history) == 1
-    assert proj_a_history[0]["score"] == 40
-
-    proj_b_history = health_score.load_history("proj-b")
-    assert len(proj_b_history) == 1
-    assert proj_b_history[0]["score"] == 90
-
-    # Overwriting proj-a's same-date entry must not touch proj-b's.
-    health_score.save_health_entry({"date": "2026-02-01", "projectId": "proj-a", "score": 45})
-    assert health_score.load_history("proj-a")[0]["score"] == 45
-    assert health_score.load_history("proj-b")[0]["score"] == 90
+        # Overwriting proj_a's same-date entry must not touch proj_b's.
+        health_score.save_health_entry({"date": "2026-02-01", "projectId": project_a["id"], "score": 45})
+        assert health_score.load_history(project_a["id"])[0]["score"] == 45
+        assert health_score.load_history(project_b["id"])[0]["score"] == 90
+    finally:
+        projects_store.delete_project(project_a["id"])
+        projects_store.delete_project(project_b["id"])

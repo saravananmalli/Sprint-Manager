@@ -3,11 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 backend/.env
-backend/health_history.json
-backend/health_history.json.lock
-backend/user_projects.json
-backend/user_projects.json.lock
-backend/slack_config.json
+# Pre-Supabase-migration JSON files, kept as a rollback reference only —
+# not part of the app's persistence anymore (see backend/migrations/).
+backend/legacy_json_backup/
 
 # Node
 node_modules/

@@ -15,6 +15,7 @@ import agent_runner
 import health_score
 import projects_store
 import risk_engine
+import runtime_settings
 
 
 def _hours_since(iso_ts, now):
@@ -25,7 +26,7 @@ def _hours_since(iso_ts, now):
 def build_report(project_id, now=None):
     now = now or datetime.now(timezone.utc)
     project = projects_store.get_project(project_id)
-    tickets = risk_engine.tag_tickets(project["tickets"], now=now)
+    tickets = risk_engine.tag_tickets(project["tickets"], now=now, thresholds=runtime_settings.get_thresholds())
     velocity = health_score.compute_velocity(project, today=now.date())
     health = health_score.compute_health_score(tickets)
     trend = health_score.compute_trend(health_score.load_history(project_id))

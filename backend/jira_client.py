@@ -1,10 +1,11 @@
-"""Live Jira connector, with graceful fallback to the in-memory project's
-seed/mock tickets when live config is missing or the API call fails.
+"""Live Jira connector, with graceful fallback to the project's seed/mock
+tickets when live config is missing or the API call fails.
 
-Multi-project: a project may set its own `jiraBoardId` / `jiraSprintId` in
-projects_data.json / user_projects.json. If it doesn't, the global
-JIRA_BOARD_ID / JIRA_SPRINT_ID env vars are used instead (single-board demo
-setups). USE_MOCK_DATA=true (default) skips the network call entirely.
+Multi-project: a project may set its own `jiraBoardId` / `jiraSprintId` via
+the `projects.jira_board_id`/`jira_sprint_id` columns in Supabase. If it
+doesn't, the global JIRA_BOARD_ID / JIRA_SPRINT_ID env vars are used instead
+(single-board demo setups). USE_MOCK_DATA=true (default) skips the network
+call entirely.
 """
 
 import logging

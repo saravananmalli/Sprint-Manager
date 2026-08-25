@@ -1,27 +1,19 @@
 """Slack scheduler config, per-project channel mapping, and escalations."""
 
-import json
 import os
 from datetime import datetime, timezone
+
+from supabase import create_client
 
 import projects_store
 import team_insights
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "slack_config.json")
-
-_DEFAULT_STATE = {"lastRun": {}}
+_client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
 
-def _load_state():
-    if not os.path.exists(CONFIG_PATH):
-        return dict(_DEFAULT_STATE)
-    with open(CONFIG_PATH, "r") as f:
-        return json.load(f)
-
-
-def _save_state(state):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(state, f, indent=2)
+def _last_run_by_project():
+    resp = _client.table("slack_config").select("*").execute()
+    return {r["project_id"]: r["last_run_at"] for r in resp.data}
 
 
 def scheduler_config():
@@ -45,7 +37,7 @@ def daily_flow_steps():
 
 
 def project_channels():
-    state = _load_state()
+    last_run = _last_run_by_project()
     webhook_configured = bool(os.environ.get("SLACK_WEBHOOK_URL", "").strip())
     channels = []
     for project in projects_store.all_projects():
@@ -54,15 +46,15 @@ def project_channels():
             "projectName": project["name"],
             "channel": project["channel"],
             "webhookConfigured": webhook_configured,
-            "lastRun": state["lastRun"].get(project["id"]),
+            "lastRun": last_run.get(project["id"]),
         })
     return channels
 
 
 def mark_run(project_id):
-    state = _load_state()
-    state["lastRun"][project_id] = datetime.now(timezone.utc).isoformat()
-    _save_state(state)
+    _client.table("slack_config").upsert(
+        {"project_id": project_id, "last_run_at": datetime.now(timezone.utc).isoformat()}
+    ).execute()
 
 
 def escalations():
