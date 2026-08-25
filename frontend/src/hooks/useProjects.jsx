@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import client from '../api/client'
 
 const ProjectContext = createContext(null)
@@ -41,15 +41,17 @@ export function ProjectProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, id)
   }, [])
 
-  const currentProject = projects.find((p) => p.id === projectId) || null
-
-  return (
-    <ProjectContext.Provider
-      value={{ projects, portfolio, projectId, setProjectId, currentProject, loading, error, backendUnreachable, refetch: load }}
-    >
-      {children}
-    </ProjectContext.Provider>
+  const currentProject = useMemo(
+    () => projects.find((p) => p.id === projectId) || null,
+    [projects, projectId]
   )
+
+  const value = useMemo(
+    () => ({ projects, portfolio, projectId, setProjectId, currentProject, loading, error, backendUnreachable, refetch: load }),
+    [projects, portfolio, projectId, setProjectId, currentProject, loading, error, backendUnreachable, load]
+  )
+
+  return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 
 export function useProjects() {

@@ -1,7 +1,8 @@
+import { memo } from 'react'
 import { ChartBarIcon, CheckCircleIcon as CheckOutline, ClipboardDocumentCheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import StatTile from '../common/StatTile'
 
-export default function MetricsSummary({ sprint, onSelect }) {
+function MetricsSummary({ sprint, onSelect }) {
   const { tickets, pointsDone, totalCommitted, velocity, projectedCompletion } = sprint
   const done = tickets.filter((t) => t.status === 'Done')
   const stale = tickets.filter((t) => t.riskTags?.includes('STALE')).length
@@ -56,3 +57,5 @@ export default function MetricsSummary({ sprint, onSelect }) {
     </div>
   )
 }
+
+export default memo(MetricsSummary)

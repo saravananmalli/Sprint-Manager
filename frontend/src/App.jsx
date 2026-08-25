@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useRef, useState } from 'react'
+import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import BackendBanner from './components/common/BackendBanner'
@@ -14,17 +14,22 @@ import { AuthProvider, useAuth } from './hooks/useAuth'
 import { ProjectProvider } from './hooks/useProjects'
 import { ThemeProvider } from './hooks/useTheme'
 import { ToastProvider } from './hooks/useToast'
-import AllProjectsPage from './pages/AllProjectsPage'
-import AnalyticsPage from './pages/AnalyticsPage'
-import Dashboard from './pages/Dashboard'
-import KanbanPage from './pages/KanbanPage'
 import LoginPage from './pages/LoginPage'
-import ReportsPage from './pages/ReportsPage'
-import SettingsPage from './pages/SettingsPage'
-import SlackPage from './pages/SlackPage'
-import TeamPage from './pages/TeamPage'
 import { GO_TO_ROUTES, NAV_ITEMS } from './utils/navItems'
 import { hasSeenOnboarding, markOnboardingSeen } from './utils/onboarding'
+
+// Route-level code splitting: each page (and anything heavy it imports,
+// e.g. recharts in Dashboard/Analytics/Reports) becomes its own chunk
+// instead of all 8 pages loading in the initial bundle regardless of which
+// one the user actually lands on.
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const AllProjectsPage = lazy(() => import('./pages/AllProjectsPage'))
+const KanbanPage = lazy(() => import('./pages/KanbanPage'))
+const TeamPage = lazy(() => import('./pages/TeamPage'))
+const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
+const SlackPage = lazy(() => import('./pages/SlackPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 const SHORTCUTS = [
   { keys: 'Ctrl K', label: 'Open command palette' },
@@ -173,17 +178,19 @@ function AppShell() {
         <Sidebar />
         <main id="main-content" className="flex-1 min-w-0 overflow-y-auto">
           <div className="mx-auto max-w-[1600px] w-full p-4 sm:p-8">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/all-projects" element={<AllProjectsPage />} />
-            <Route path="/kanban" element={<KanbanPage />} />
-            <Route path="/team" element={<TeamPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/slack" element={<SlackPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<div className="flex justify-center py-24"><Spinner className="w-6 h-6 text-brand-600" /></div>}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/all-projects" element={<AllProjectsPage />} />
+              <Route path="/kanban" element={<KanbanPage />} />
+              <Route path="/team" element={<TeamPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/slack" element={<SlackPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
           </div>
         </main>
       </div>

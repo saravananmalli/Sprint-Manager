@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ArrowUpRightIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { Link } from 'react-router-dom'
 import Card from '../common/Card'
@@ -12,7 +13,7 @@ function topRiskyTickets(tickets, limit = 5) {
     .slice(0, limit)
 }
 
-export default function RiskTicketsPanel({ tickets = [] }) {
+function RiskTicketsPanel({ tickets = [] }) {
   const risky = topRiskyTickets(tickets)
 
   return (
@@ -62,3 +63,5 @@ export default function RiskTicketsPanel({ tickets = [] }) {
     </Card>
   )
 }
+
+export default memo(RiskTicketsPanel)

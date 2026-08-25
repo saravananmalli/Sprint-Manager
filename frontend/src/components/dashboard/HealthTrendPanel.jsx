@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import Card from '../common/Card'
 
@@ -5,7 +6,7 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export default function HealthTrendPanel({ history }) {
+function HealthTrendPanel({ history }) {
   return (
     <Card className="p-6">
       <div className="flex items-center justify-between mb-1">
@@ -43,3 +44,5 @@ export default function HealthTrendPanel({ history }) {
     </Card>
   )
 }
+
+export default memo(HealthTrendPanel)

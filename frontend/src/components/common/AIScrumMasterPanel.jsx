@@ -9,9 +9,18 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import client from '../../api/client'
+import { useAgentRun } from '../../hooks/useAgentRun'
 import { useProjects } from '../../hooks/useProjects'
 import { RISK_TAG_LABELS } from '../../utils/riskColors'
 import Spinner from './Spinner'
+
+// The panel unmounts on close (see FloatingAiButton) and would otherwise
+// re-fetch sprint/health/team/report data fresh on every open, even though
+// Dashboard/ReportsPage likely fetched the same endpoints moments earlier.
+// Module-level cache (survives unmount, not page reload) keyed by project +
+// runVersion so a completed agent run still invalidates it.
+const CACHE_TTL_MS = 30_000
+const scrumMasterCache = new Map()
 
 function topRiskyTickets(tickets, limit = 5) {
   return [...tickets]
@@ -26,6 +35,7 @@ function atRiskOwnerNames(tickets) {
 
 export default function AIScrumMasterPanel({ onClose }) {
   const { projectId, currentProject } = useProjects()
+  const { runVersion } = useAgentRun()
   const [sprint, setSprint] = useState(null)
   const [health, setHealth] = useState(null)
   const [highRiskMembers, setHighRiskMembers] = useState([])
@@ -34,10 +44,25 @@ export default function AIScrumMasterPanel({ onClose }) {
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
 
+  const applyData = (data) => {
+    setSprint(data.sprint)
+    setHealth(data.health)
+    setHighRiskMembers(data.highRiskMembers)
+    setScrumMasterAsk(data.scrumMasterAsk)
+  }
+
   const load = () => {
     if (!projectId) return
-    setLoading(true)
     setSendResult(null)
+
+    const cached = scrumMasterCache.get(projectId)
+    if (cached && cached.runVersion === runVersion && Date.now() - cached.at < CACHE_TTL_MS) {
+      applyData(cached.data)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
     Promise.all([
       client.get(`/api/projects/${projectId}/sprint`),
       client.get(`/api/projects/${projectId}/health`),
@@ -45,15 +70,19 @@ export default function AIScrumMasterPanel({ onClose }) {
       client.get(`/api/projects/${projectId}/reports/leadership`),
     ])
       .then(([sprintRes, healthRes, teamRes, reportRes]) => {
-        setSprint(sprintRes.data)
-        setHealth(healthRes.data)
-        setHighRiskMembers(teamRes.data.members.filter((m) => m.riskLevel === 'HIGH').map((m) => m.name))
-        setScrumMasterAsk(reportRes.data.scrumMasterAsk)
+        const data = {
+          sprint: sprintRes.data,
+          health: healthRes.data,
+          highRiskMembers: teamRes.data.members.filter((m) => m.riskLevel === 'HIGH').map((m) => m.name),
+          scrumMasterAsk: reportRes.data.scrumMasterAsk,
+        }
+        scrumMasterCache.set(projectId, { data, at: Date.now(), runVersion })
+        applyData(data)
       })
       .finally(() => setLoading(false))
   }
 
-  useEffect(load, [projectId])
+  useEffect(load, [projectId, runVersion])
 
   const handleDmAll = async () => {
     if (!projectId || sending) return

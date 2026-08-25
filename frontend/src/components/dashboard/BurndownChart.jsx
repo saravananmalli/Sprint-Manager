@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import { Area, CartesianGrid, Line, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import Card from '../common/Card'
 
@@ -27,10 +28,10 @@ function niceYTicks(max) {
   return Array.from({ length: 5 }, (_, i) => Math.round(step * i))
 }
 
-export default function BurndownChart({ sprint }) {
-  const data = buildBurndownData(sprint)
+function BurndownChart({ sprint }) {
+  const data = useMemo(() => buildBurndownData(sprint), [sprint])
   const totalDays = sprint.daysElapsed + sprint.daysRemaining
-  const yTicks = niceYTicks(sprint.totalCommitted)
+  const yTicks = useMemo(() => niceYTicks(sprint.totalCommitted), [sprint.totalCommitted])
 
   return (
     <Card className="p-6">
@@ -70,3 +71,5 @@ export default function BurndownChart({ sprint }) {
     </Card>
   )
 }
+
+export default memo(BurndownChart)

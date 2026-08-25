@@ -18,14 +18,7 @@ import { useProjects } from '../hooks/useProjects'
 import { useToast } from '../hooks/useToast'
 import { projectDot } from '../utils/projectColor'
 import { healthScoreClasses, SPRINT_STATUS_CLASSES } from '../utils/riskColors'
-
-async function waitForRun(runId) {
-  for (;;) {
-    const { data } = await client.get('/api/run/status', { params: { run_id: runId } })
-    if (data.status !== 'running') return data
-    await new Promise((r) => setTimeout(r, 1500))
-  }
-}
+import { waitForRunStatus } from '../utils/runPolling'
 
 export default function AllProjectsPage() {
   const { projects, portfolio, loading, error, refetch, setProjectId } = useProjects()
@@ -63,7 +56,7 @@ export default function AllProjectsPage() {
     try {
       for (const project of projects) {
         const { data } = await client.post('/api/run', null, { params: { project: project.id } })
-        await waitForRun(data.run_id)
+        await waitForRunStatus(data.run_id)
       }
       showToast('Ran the agent across all projects', 'success')
       refetch()

@@ -1,9 +1,9 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import client from '../api/client'
+import { RUN_POLL_INTERVAL_MS } from '../utils/runPolling'
 import { useProjects } from './useProjects'
 import { useToast } from './useToast'
 
-const POLL_INTERVAL_MS = 2000
 const AgentRunContext = createContext(null)
 
 export function AgentRunProvider({ children }) {
@@ -54,7 +54,7 @@ export function AgentRunProvider({ children }) {
           setRunning(false)
           showToast(err.message || 'Failed to check run status', 'error')
         }
-      }, POLL_INTERVAL_MS)
+      }, RUN_POLL_INTERVAL_MS)
     },
     [finish, showToast, stopPolling]
   )
@@ -77,13 +77,12 @@ export function AgentRunProvider({ children }) {
     setLastRunSummary((current) => (current ? { ...current, seen: true } : current))
   }, [])
 
-  return (
-    <AgentRunContext.Provider
-      value={{ running, step, runAgent, lastRunAt, runVersion, lastRunSummary, markNotificationSeen }}
-    >
-      {children}
-    </AgentRunContext.Provider>
+  const value = useMemo(
+    () => ({ running, step, runAgent, lastRunAt, runVersion, lastRunSummary, markNotificationSeen }),
+    [running, step, runAgent, lastRunAt, runVersion, lastRunSummary, markNotificationSeen]
   )
+
+  return <AgentRunContext.Provider value={value}>{children}</AgentRunContext.Provider>
 }
 
 export function useAgentRun() {

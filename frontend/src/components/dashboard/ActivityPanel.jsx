@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { CheckCircleIcon, ClockIcon, LockClosedIcon, SparklesIcon } from '@heroicons/react/24/solid'
 import Card from '../common/Card'
 
@@ -25,7 +26,7 @@ function eventFor(ticket) {
   return null
 }
 
-export default function ActivityPanel({ tickets = [] }) {
+function ActivityPanel({ tickets = [] }) {
   const events = tickets
     .map(eventFor)
     .filter(Boolean)
@@ -59,3 +60,5 @@ export default function ActivityPanel({ tickets = [] }) {
     </Card>
   )
 }
+
+export default memo(ActivityPanel)

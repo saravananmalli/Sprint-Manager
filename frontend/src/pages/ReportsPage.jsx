@@ -33,21 +33,26 @@ export default function ReportsPage() {
   const [report, setReport] = useState(null)
   const [standup, setStandup] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [emailStatus, setEmailStatus] = useState(null)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
+  const load = () => {
     if (!projectId) return
     setLoading(true)
+    setError(null)
     client
       .get(`/api/projects/${projectId}/reports/leadership`)
       .then(({ data }) => setReport(data))
+      .catch((err) => setError(err))
       .finally(() => setLoading(false))
     client
       .get(`/api/projects/${projectId}/reports/standup`)
       .then(({ data }) => setStandup(data))
       .catch(() => setStandup(null))
-  }, [projectId, runVersion])
+  }
+
+  useEffect(load, [projectId, runVersion])
 
   const copyReport = async () => {
     if (!report) return
@@ -78,6 +83,21 @@ export default function ReportsPage() {
     } catch (err) {
       showToast(err.message || 'Failed to send to Slack', 'error')
     }
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-red-100 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-8 text-center">
+        <p className="text-red-700 dark:text-red-300 mb-4">{error.message || 'Failed to load the leadership report'}</p>
+        <button
+          type="button"
+          onClick={load}
+          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+        >
+          Retry
+        </button>
+      </div>
+    )
   }
 
   if (loading || !report) {

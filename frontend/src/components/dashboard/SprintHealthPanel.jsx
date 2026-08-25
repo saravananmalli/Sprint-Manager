@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ArrowTrendingDownIcon, ArrowTrendingUpIcon, MinusIcon } from '@heroicons/react/24/solid'
 import Card from '../common/Card'
 import { healthScoreClasses } from '../../utils/riskColors'
@@ -15,7 +16,7 @@ const ROWS = [
   { key: 'completionScore', label: 'Completion' },
 ]
 
-export default function SprintHealthPanel({ score, trend, components }) {
+function SprintHealthPanel({ score, trend, components }) {
   const TrendIcon = TREND_ICON[trend] ?? MinusIcon
   const { stroke, text } = healthScoreClasses(score)
   const pct = score ?? 0
@@ -71,3 +72,5 @@ export default function SprintHealthPanel({ score, trend, components }) {
     </Card>
   )
 }
+
+export default memo(SprintHealthPanel)

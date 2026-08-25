@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ArrowUpRightIcon, Square2StackIcon, UserGroupIcon } from '@heroicons/react/24/outline'
 import { Link } from 'react-router-dom'
 import Card from '../common/Card'
@@ -7,7 +8,7 @@ import { RISK_LEVEL_CLASSES } from '../../utils/riskColors'
 
 const RISK_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 }
 
-export default function TeamWorkloadPanel({ members, projectName }) {
+function TeamWorkloadPanel({ members, projectName }) {
   const top = [...members]
     .sort((a, b) => RISK_RANK[a.riskLevel] - RISK_RANK[b.riskLevel] || b.ticketsTotal - a.ticketsTotal)
     .slice(0, 5)
@@ -75,3 +76,5 @@ export default function TeamWorkloadPanel({ members, projectName }) {
     </Card>
   )
 }
+
+export default memo(TeamWorkloadPanel)
