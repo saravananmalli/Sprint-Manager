@@ -5,13 +5,14 @@ import {
   SparklesIcon as SparklesSolid,
   XCircleIcon,
 } from '@heroicons/react/24/solid'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import client from '../../api/client'
 import { useAgentRun } from '../../hooks/useAgentRun'
 import { useProjects } from '../../hooks/useProjects'
 import { RISK_TAG_LABELS } from '../../utils/riskColors'
+import Skeleton from './Skeleton'
 import Spinner from './Spinner'
 
 // The panel unmounts on close (see FloatingAiButton) and would otherwise
@@ -33,6 +34,48 @@ function atRiskOwnerNames(tickets) {
   return [...new Set(tickets.filter((t) => t.riskTags?.length > 0 && t.assignee?.name).map((t) => t.assignee.name))]
 }
 
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1 py-1" role="status" aria-label="Thinking">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400"
+          style={{ animationDelay: `${i * 150}ms` }}
+        />
+      ))}
+    </span>
+  )
+}
+
+function SectionSkeleton({ lines = 2 }) {
+  return (
+    <div className="rounded-xl border border-gray-100 dark:border-gray-800 p-4 space-y-2.5" aria-hidden="true">
+      <Skeleton className="h-3 w-28" />
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton key={i} className={i === lines - 1 ? 'h-3.5 w-2/3' : 'h-3.5 w-full'} />
+      ))}
+    </div>
+  )
+}
+
+function TicketsSkeleton() {
+  return (
+    <div className="rounded-xl border border-gray-100 dark:border-gray-800 p-4 space-y-3.5" aria-hidden="true">
+      <Skeleton className="h-3 w-36" />
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="flex items-start justify-between gap-3">
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-16" />
+            <Skeleton className="h-3.5 w-4/5" />
+          </div>
+          <Skeleton className="h-3.5 w-16" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function AIScrumMasterPanel({ onClose }) {
   const { projectId, currentProject } = useProjects()
   const { runVersion } = useAgentRun()
@@ -40,7 +83,15 @@ export default function AIScrumMasterPanel({ onClose }) {
   const [health, setHealth] = useState(null)
   const [highRiskMembers, setHighRiskMembers] = useState([])
   const [scrumMasterAsk, setScrumMasterAsk] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Each part loads independently so the panel fills in progressively
+  // instead of sitting empty until the slowest request (team) finishes.
+  const [coreLoading, setCoreLoading] = useState(true) // sprint + health
+  const [teamLoading, setTeamLoading] = useState(true)
+  const [askLoading, setAskLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const loading = coreLoading || teamLoading || askLoading
+  const activeProject = useRef(projectId)
+  activeProject.current = projectId
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
 
@@ -51,38 +102,69 @@ export default function AIScrumMasterPanel({ onClose }) {
     setScrumMasterAsk(data.scrumMasterAsk)
   }
 
-  const load = () => {
+  const load = (force = false) => {
     if (!projectId) return
     setSendResult(null)
+    setError(null)
 
     const cached = scrumMasterCache.get(projectId)
-    if (cached && cached.runVersion === runVersion && Date.now() - cached.at < CACHE_TTL_MS) {
+    if (!force && cached && cached.runVersion === runVersion && Date.now() - cached.at < CACHE_TTL_MS) {
       applyData(cached.data)
-      setLoading(false)
+      setCoreLoading(false)
+      setTeamLoading(false)
+      setAskLoading(false)
       return
     }
 
-    setLoading(true)
-    Promise.all([
-      client.get(`/api/projects/${projectId}/sprint`),
-      client.get(`/api/projects/${projectId}/health`),
-      client.get('/api/team', { params: { project: projectId } }),
-      client.get(`/api/projects/${projectId}/reports/leadership`),
-    ])
-      .then(([sprintRes, healthRes, teamRes, reportRes]) => {
-        const data = {
-          sprint: sprintRes.data,
-          health: healthRes.data,
-          highRiskMembers: teamRes.data.members.filter((m) => m.riskLevel === 'HIGH').map((m) => m.name),
-          scrumMasterAsk: reportRes.data.scrumMasterAsk,
-        }
-        scrumMasterCache.set(projectId, { data, at: Date.now(), runVersion })
-        applyData(data)
-      })
-      .finally(() => setLoading(false))
+    const requested = projectId
+    const current = () => activeProject.current === requested
+    const data = { sprint: null, health: null, highRiskMembers: [], scrumMasterAsk: null }
+
+    // Drop the previous project's content so it never shows under this one.
+    setSprint(null)
+    setHealth(null)
+    setHighRiskMembers([])
+    setScrumMasterAsk(null)
+    setCoreLoading(true)
+    setTeamLoading(true)
+    setAskLoading(true)
+
+    const core = Promise.all([
+      client.get(`/api/projects/${requested}/sprint`),
+      client.get(`/api/projects/${requested}/health`),
+    ]).then(([sprintRes, healthRes]) => {
+      data.sprint = sprintRes.data
+      data.health = healthRes.data
+      if (current()) {
+        setSprint(data.sprint)
+        setHealth(data.health)
+      }
+    })
+    const team = client.get('/api/team', { params: { project: requested } }).then((res) => {
+      data.highRiskMembers = res.data.members.filter((m) => m.riskLevel === 'HIGH').map((m) => m.name)
+      if (current()) setHighRiskMembers(data.highRiskMembers)
+    })
+    const ask = client.get(`/api/projects/${requested}/reports/leadership`).then((res) => {
+      data.scrumMasterAsk = res.data.scrumMasterAsk
+      if (current()) setScrumMasterAsk(data.scrumMasterAsk)
+    })
+
+    const done = (setter) => () => current() && setter(false)
+    core.then(done(setCoreLoading), done(setCoreLoading))
+    team.then(done(setTeamLoading), done(setTeamLoading))
+    ask.then(done(setAskLoading), done(setAskLoading))
+
+    Promise.allSettled([core, team, ask]).then((results) => {
+      if (!current()) return
+      const failed = results.find((r) => r.status === 'rejected')
+      if (failed) setError(failed.reason?.message || 'Could not load the sprint review')
+      else scrumMasterCache.set(requested, { data, at: Date.now(), runVersion })
+    })
   }
 
-  useEffect(load, [projectId, runVersion])
+  useEffect(() => {
+    load()
+  }, [projectId, runVersion])
 
   const handleDmAll = async () => {
     if (!projectId || sending) return
@@ -150,8 +232,8 @@ export default function AIScrumMasterPanel({ onClose }) {
             <div>
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI Scrum Master</p>
               <p className="flex items-center gap-1.5 text-xs text-gray-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                {currentProject?.name ?? '—'} · {loading ? 'Thinking…' : 'Ready'}
+                <span className={clsx('h-1.5 w-1.5 rounded-full', error ? 'bg-red-500' : loading ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500')} />
+                {currentProject?.name ?? '—'} · {error ? 'Something went wrong' : loading ? 'Thinking…' : 'Ready'}
               </p>
             </div>
           </div>
@@ -171,8 +253,8 @@ export default function AIScrumMasterPanel({ onClose }) {
               <SparklesIcon className="w-4 h-4" />
             </span>
             <div className="rounded-2xl rounded-tl-sm bg-gray-50 dark:bg-gray-800/60 px-3.5 py-2.5 text-sm text-gray-700 dark:text-gray-300">
-              {loading || !sprint ? (
-                'Reviewing your sprint…'
+              {coreLoading || !sprint ? (
+                <TypingDots />
               ) : (
                 <>
                   Reviewing <span className="font-medium text-gray-900 dark:text-gray-100">{currentProject?.name}</span> ·{' '}
@@ -182,7 +264,23 @@ export default function AIScrumMasterPanel({ onClose }) {
             </div>
           </div>
 
-          {!loading && sprint && riskReasons.length > 0 && (
+          {error && (
+            <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
+              <p className="text-sm font-semibold text-red-800 dark:text-red-300">Couldn&apos;t finish the review</p>
+              <p className="mt-1 text-sm text-red-700 dark:text-red-300">{error}</p>
+              <button
+                type="button"
+                onClick={() => load(true)}
+                className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {(coreLoading || teamLoading) && !error && <SectionSkeleton lines={3} />}
+
+          {!coreLoading && !teamLoading && sprint && riskReasons.length > 0 && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
               <p className="mb-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
                 Why is {currentProject?.name} at risk?
@@ -198,7 +296,9 @@ export default function AIScrumMasterPanel({ onClose }) {
             </div>
           )}
 
-          {!loading && scrumMasterAsk && (
+          {askLoading && !error && <SectionSkeleton lines={2} />}
+
+          {!askLoading && scrumMasterAsk && (
             <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
                 Suggested actions
@@ -210,7 +310,9 @@ export default function AIScrumMasterPanel({ onClose }) {
             </div>
           )}
 
-          {!loading && sprint && (
+          {coreLoading && !error && <TicketsSkeleton />}
+
+          {!coreLoading && sprint && (
             <div className="rounded-xl border border-gray-100 dark:border-gray-800 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 Top risky tickets ({risky.length})
@@ -239,11 +341,11 @@ export default function AIScrumMasterPanel({ onClose }) {
         <div className="flex items-start justify-between gap-2 border-t border-gray-100 dark:border-gray-800 px-5 py-3">
           <button
             type="button"
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
           >
-            <ArrowPathIcon className="w-4 h-4" />
+            <ArrowPathIcon className={clsx('w-4 h-4', loading && 'animate-spin')} />
             Regenerate
           </button>
 

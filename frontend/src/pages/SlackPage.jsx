@@ -9,7 +9,7 @@ import {
 import { useEffect, useState } from 'react'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { SlackSkeleton } from '../components/common/PageSkeletons'
 import { useProjects } from '../hooks/useProjects'
 import { useToast } from '../hooks/useToast'
 import { formatRelativeTime } from '../utils/formatters'
@@ -22,7 +22,6 @@ export default function SlackPage() {
   const [sendingId, setSendingId] = useState(null)
 
   const load = () => {
-    setLoading(true)
     client
       .get('/api/slack/overview')
       .then(({ data }) => setOverview(data))
@@ -53,16 +52,7 @@ export default function SlackPage() {
   }
 
   if (loading || !overview) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-64" />
-          ))}
-        </div>
-        <Skeleton className="h-72" />
-      </div>
-    )
+    return <SlackSkeleton />
   }
 
   const webhookConfigured = overview.channels[0]?.webhookConfigured

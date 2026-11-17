@@ -1,8 +1,8 @@
 import { BoltIcon } from '@heroicons/react/24/outline'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { KanbanSkeleton } from '../components/common/PageSkeletons'
 import TicketDrawer from '../components/tickets/TicketDrawer'
 import { useProjects } from '../hooks/useProjects'
 import { useToast } from '../hooks/useToast'
@@ -51,15 +51,17 @@ function GitMergeIcon(props) {
   )
 }
 
-function TicketCard({ ticket, onDragStart, onOpen }) {
+const TicketCard = memo(function TicketCard({ ticket, isDragging, onDragStart, onDragEnd, onOpen, registerEl }) {
   const draggedRef = useRef(false)
   return (
     <div
+      ref={(el) => registerEl(ticket.id, el)}
       draggable
       onDragStart={(e) => {
         draggedRef.current = true
         onDragStart(e, ticket.id)
       }}
+      onDragEnd={onDragEnd}
       onClick={() => {
         if (draggedRef.current) {
           draggedRef.current = false
@@ -67,7 +69,9 @@ function TicketCard({ ticket, onDragStart, onOpen }) {
         }
         onOpen(ticket)
       }}
-      className="cursor-grab rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 shadow-sm hover:border-brand-200 dark:hover:border-brand-800 active:cursor-grabbing"
+      className={`cursor-grab rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 shadow-sm hover:border-brand-200 dark:hover:border-brand-800 hover:shadow-md active:cursor-grabbing transition-[opacity,box-shadow,border-color] duration-150 will-change-transform ${
+        isDragging ? 'opacity-40 scale-[0.98]' : ''
+      }`}
     >
       <div className="mb-1.5 flex items-center gap-2">
         <span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{ticket.id}</span>
@@ -98,26 +102,93 @@ function TicketCard({ ticket, onDragStart, onOpen }) {
       )}
     </div>
   )
-}
+})
 
 export default function KanbanPage() {
   const { projectId, currentProject } = useProjects()
   const [board, setBoard] = useState(null)
   const [loading, setLoading] = useState(true)
   const [dragTicket, setDragTicket] = useState(null)
+  const [overColumn, setOverColumn] = useState(null)
+  const gridRef = useRef(null)
+  const cardEls = useRef(new Map())
+  const prevPos = useRef(new Map())
   const [openTicket, setOpenTicket] = useState(null)
   const { showToast } = useToast()
 
+  // Tracks the project currently on screen so a slow response for a
+  // previous project can't overwrite the board (and get its tickets dropped
+  // into the wrong project).
+  const activeProject = useRef(projectId)
+  activeProject.current = projectId
+
   const load = () => {
     if (!projectId) return
-    setLoading(true)
+    const requested = projectId
     client
-      .get(`/api/projects/${projectId}/kanban`)
-      .then(({ data }) => setBoard(data))
-      .finally(() => setLoading(false))
+      .get(`/api/projects/${requested}/kanban`)
+      .then(({ data }) => {
+        if (activeProject.current === requested) setBoard(data)
+      })
+      .finally(() => {
+        if (activeProject.current === requested) setLoading(false)
+      })
   }
 
-  useEffect(load, [projectId])
+  useEffect(() => {
+    // New project: show the skeleton. Later reloads (move/reset) keep the board visible.
+    setBoard(null)
+    load()
+  }, [projectId])
+
+  const registerEl = useCallback((id, el) => {
+    if (el) cardEls.current.set(id, el)
+    else cardEls.current.delete(id)
+  }, [])
+
+  const handleDragStart = useCallback((e, id) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+    setDragTicket(id)
+  }, [])
+
+  const handleDragEnd = useCallback(() => {
+    setDragTicket(null)
+    setOverColumn(null)
+  }, [])
+
+  // FLIP: when the board changes, slide each card from its old position to
+  // its new one instead of teleporting.
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const origin = grid.getBoundingClientRect()
+    cardEls.current.forEach((el) => {
+      el.style.transition = 'none'
+      el.style.transform = ''
+    })
+    const next = new Map()
+    cardEls.current.forEach((el, id) => {
+      const r = el.getBoundingClientRect()
+      next.set(id, { x: r.left - origin.left, y: r.top - origin.top })
+    })
+    if (!reduce) {
+      next.forEach((pos, id) => {
+        const prev = prevPos.current.get(id)
+        const el = cardEls.current.get(id)
+        if (!prev || !el) return
+        const dx = prev.x - pos.x
+        const dy = prev.y - pos.y
+        if (!dx && !dy) return
+        el.style.transform = `translate(${dx}px, ${dy}px)`
+        el.getBoundingClientRect() // flush so the transition starts from the inverted position
+        el.style.transition = 'transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+        el.style.transform = ''
+      })
+    }
+    prevPos.current = next
+  }, [board])
 
   const simulate = async (event) => {
     try {
@@ -136,27 +207,37 @@ export default function KanbanPage() {
   }
 
   const handleDrop = async (toColumn) => {
-    if (!dragTicket) return
-    try {
-      await client.post(`/api/projects/${projectId}/kanban/move`, { ticketId: dragTicket, toColumn })
-      load()
-    } catch (err) {
-      showToast(err.message || 'Could not move ticket', 'error')
-    }
+    const id = dragTicket
     setDragTicket(null)
+    setOverColumn(null)
+    if (!id || !board) return
+    const from = board.columns.find((c) => c.tickets.some((t) => t.id === id))
+    if (!from || from.name === toColumn) return
+
+    // Optimistic move: the card lands instantly; the server call runs behind it.
+    const requestedProject = projectId
+    const snapshot = board
+    const ticket = from.tickets.find((t) => t.id === id)
+    setBoard({
+      ...board,
+      columns: board.columns.map((c) => {
+        if (c.name === from.name) return { ...c, tickets: c.tickets.filter((t) => t.id !== id) }
+        if (c.name === toColumn) return { ...c, tickets: [{ ...ticket, status: toColumn }, ...c.tickets] }
+        return c
+      }),
+    })
+    try {
+      await client.post(`/api/projects/${requestedProject}/kanban/move`, { ticketId: id, toColumn })
+      load() // quiet reconcile with server state (risk tags, activity log)
+    } catch (err) {
+      if (activeProject.current === requestedProject) setBoard(snapshot)
+      showToast(err.message || 'Could not move ticket', 'error')
+      load() // resync in case the board was stale
+    }
   }
 
   if (loading || !board) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-24" />
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-96" />
-          ))}
-        </div>
-      </div>
-    )
+    return <KanbanSkeleton />
   }
 
   return (
@@ -221,13 +302,27 @@ export default function KanbanPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {board.columns.map((col) => (
           <div
             key={col.name}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => handleDrop(col.name)}
-            className="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 p-3 min-h-[200px]"
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              if (overColumn !== col.name) setOverColumn(col.name)
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setOverColumn((c) => (c === col.name ? null : c))
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              handleDrop(col.name)
+            }}
+            className={`rounded-2xl border p-3 min-h-[200px] transition-colors duration-150 ${
+              dragTicket && overColumn === col.name
+                ? 'border-brand-400 bg-brand-50 dark:border-brand-600 dark:bg-brand-900/20'
+                : 'border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50'
+            }`}
           >
             <div className="flex items-center gap-2 mb-3 px-1">
               <span className={`h-2 w-2 rounded-full ${COLUMN_DOT[col.name]}`} />
@@ -236,7 +331,15 @@ export default function KanbanPage() {
             </div>
             <div className="space-y-3">
               {col.tickets.map((ticket) => (
-                <TicketCard key={ticket.id} ticket={ticket} onDragStart={(e, id) => setDragTicket(id)} onOpen={setOpenTicket} />
+                <TicketCard
+                  key={ticket.id}
+                  ticket={ticket}
+                  isDragging={dragTicket === ticket.id}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onOpen={setOpenTicket}
+                  registerEl={registerEl}
+                />
               ))}
             </div>
           </div>

@@ -5,7 +5,7 @@ import {
   EnvelopeIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Area,
   CartesianGrid,
@@ -18,7 +18,7 @@ import {
 } from 'recharts'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { ReportsSkeleton } from '../components/common/PageSkeletons'
 import { useAgentRun } from '../hooks/useAgentRun'
 import { useProjects } from '../hooks/useProjects'
 import { useSprint } from '../hooks/useSprint'
@@ -37,20 +37,29 @@ export default function ReportsPage() {
   const [emailStatus, setEmailStatus] = useState(null)
   const [copied, setCopied] = useState(false)
 
+  // Ignore responses for a project the user has already switched away from.
+  const activeProject = useRef(projectId)
+  activeProject.current = projectId
+
   const load = () => {
     if (!projectId) return
-    setLoading(true)
+    const requested = projectId
+    const current = () => activeProject.current === requested
     setError(null)
     client
-      .get(`/api/projects/${projectId}/reports/leadership`)
-      .then(({ data }) => setReport(data))
-      .catch((err) => setError(err))
-      .finally(() => setLoading(false))
+      .get(`/api/projects/${requested}/reports/leadership`)
+      .then(({ data }) => current() && setReport(data))
+      .catch((err) => current() && setError(err))
+      .finally(() => current() && setLoading(false))
     client
-      .get(`/api/projects/${projectId}/reports/standup`)
-      .then(({ data }) => setStandup(data))
-      .catch(() => setStandup(null))
+      .get(`/api/projects/${requested}/reports/standup`)
+      .then(({ data }) => current() && setStandup(data))
+      .catch(() => current() && setStandup(null))
   }
+
+  useEffect(() => {
+    setReport(null)
+  }, [projectId])
 
   useEffect(load, [projectId, runVersion])
 
@@ -101,12 +110,7 @@ export default function ReportsPage() {
   }
 
   if (loading || !report) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-96" />
-        <Skeleton className="h-64" />
-      </div>
-    )
+    return <ReportsSkeleton />
   }
 
   const emailConfigured = !emailStatus || emailStatus.sent
