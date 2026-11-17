@@ -18,7 +18,7 @@ import {
 } from 'recharts'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { AnalyticsSkeleton } from '../components/common/PageSkeletons'
 import TicketTable from '../components/tickets/TicketTable'
 import { useAgentRun } from '../hooks/useAgentRun'
 import { useProjects } from '../hooks/useProjects'
@@ -45,12 +45,23 @@ export default function AnalyticsPage() {
   const [groupBy, setGroupBy] = useState('none')
 
   useEffect(() => {
+    setData(null)
+  }, [projectId])
+
+  useEffect(() => {
     if (!projectId) return
-    setLoading(true)
+    let stale = false // ignore the response if the project changed meanwhile
     client
       .get(`/api/projects/${projectId}/analytics`)
-      .then(({ data }) => setData(data))
-      .finally(() => setLoading(false))
+      .then(({ data }) => {
+        if (!stale) setData(data)
+      })
+      .finally(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => {
+      stale = true
+    }
   }, [projectId, runVersion])
 
   const filteredTickets = useMemo(() => {
@@ -66,16 +77,7 @@ export default function AnalyticsPage() {
   const toggleRisk = (tag) => setRiskFilter((c) => (c.includes(tag) ? c.filter((t) => t !== tag) : [...c, tag]))
 
   if (loading || !data) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-72" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    )
+    return <AnalyticsSkeleton />
   }
 
   const actualSeries = data.velocityPrediction.filter((p) => p.kind === 'actual')

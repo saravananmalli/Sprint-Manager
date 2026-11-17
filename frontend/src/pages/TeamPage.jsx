@@ -10,7 +10,7 @@ import clsx from 'clsx'
 import { useEffect, useMemo, useState } from 'react'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { TeamSkeleton } from '../components/common/PageSkeletons'
 import { useAgentRun } from '../hooks/useAgentRun'
 import { useToast } from '../hooks/useToast'
 import { avatarGradient } from '../utils/avatarColor'
@@ -60,7 +60,6 @@ export default function TeamPage() {
     // Deliberately unscoped — this page reports each member's workload and
     // risk across every project they're on, not just the currently
     // selected one (that's what the Dashboard's Team workload card is for).
-    setLoading(true)
     client
       .get('/api/team')
       .then(({ data }) => {
@@ -80,12 +79,7 @@ export default function TeamPage() {
   const selected = members.find((m) => m.email === selectedEmail) || filtered[0]
 
   if (loading) {
-    return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Skeleton className="h-[600px] lg:col-span-1" />
-        <Skeleton className="h-[600px] lg:col-span-2" />
-      </div>
-    )
+    return <TeamSkeleton />
   }
 
   return (

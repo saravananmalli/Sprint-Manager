@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { PortfolioSkeleton } from '../components/common/PageSkeletons'
 import StatTile from '../components/common/StatTile'
 import NewProjectModal from '../components/projects/NewProjectModal'
 import { useProjects } from '../hooks/useProjects'
@@ -76,16 +76,7 @@ export default function AllProjectsPage() {
   }
 
   if (loading || !portfolio) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    )
+    return <PortfolioSkeleton />
   }
 
   return (

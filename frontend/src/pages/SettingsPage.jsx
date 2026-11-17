@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import client from '../api/client'
 import Card from '../components/common/Card'
-import Skeleton from '../components/common/Skeleton'
+import { SettingsFieldsSkeleton } from '../components/common/PageSkeletons'
 import { useProjects } from '../hooks/useProjects'
 import { useTheme } from '../hooks/useTheme'
 import { useToast } from '../hooks/useToast'
@@ -165,7 +165,7 @@ export default function SettingsPage() {
           These knobs live in backend/.env. Risk thresholds take effect on the next agent run — no server restart needed.
         </p>
         {loading ? (
-          <Skeleton className="h-40" />
+          <SettingsFieldsSkeleton />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {Object.entries(settings).map(([key, meta]) => (

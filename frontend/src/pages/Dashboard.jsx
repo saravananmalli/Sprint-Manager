@@ -8,7 +8,7 @@ import MetricsSummary from '../components/dashboard/MetricsSummary'
 import RiskTicketsPanel from '../components/dashboard/RiskTicketsPanel'
 import SprintHealthPanel from '../components/dashboard/SprintHealthPanel'
 import TeamWorkloadPanel from '../components/dashboard/TeamWorkloadPanel'
-import Skeleton from '../components/common/Skeleton'
+import DashboardSkeleton from '../components/dashboard/DashboardSkeleton'
 import { useAgentRun } from '../hooks/useAgentRun'
 import { useProjects } from '../hooks/useProjects'
 import { useSprint } from '../hooks/useSprint'
@@ -24,7 +24,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!projectId) return
-    client.get('/api/team', { params: { project: projectId } }).then(({ data }) => setMembers(data.members))
+    let stale = false
+    client
+      .get('/api/team', { params: { project: projectId } })
+      .then(({ data }) => {
+        if (!stale) setMembers(data.members)
+      })
+    return () => {
+      stale = true
+    }
   }, [projectId, runVersion])
 
   if (error) {
@@ -43,17 +51,7 @@ export default function Dashboard() {
   }
 
   if (loading || !sprint || !health) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
-        <Skeleton className="h-80" />
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
   const statusClass = SPRINT_STATUS_CLASSES[sprint.sprintStatus] ?? 'bg-gray-100 text-gray-700'
